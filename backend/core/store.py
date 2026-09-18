@@ -222,6 +222,26 @@ class Store:
         })
         return consult
 
+    def create_consult(self, patient_id: str, doctor_id: str, consult: dict | None = None) -> dict:
+        """put_consultation plus a CONSULT#<id> lookup row so routes can address by id alone."""
+        c = self.put_consultation(patient_id, doctor_id, consult or {})
+        self._put({
+            "PK": f"CONSULT#{c['consultId']}", "SK": "META", "entity": "CONSULT_LOOKUP",
+            "patientId": patient_id, "createdAt": c["createdAt"], "consultId": c["consultId"],
+        })
+        return c
+
+    def get_consult_by_id(self, consult_id: str):
+        meta = self._get(f"CONSULT#{consult_id}", "META")
+        if not meta:
+            return None
+        return self.get_consultation(meta["patientId"], meta["createdAt"], consult_id)
+
+    def update_consultation(self, consult: dict, **fields) -> dict:
+        merged = {**consult, **fields}
+        self.put_consultation(consult["patientId"], consult["doctorId"], merged)
+        return merged
+
     def get_consultation(self, patient_id: str, created_at: str, consult_id: str):
         return self._get(f"PAT#{patient_id}", f"CONSULT#{created_at}#{consult_id}")
 

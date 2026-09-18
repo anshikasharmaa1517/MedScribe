@@ -119,8 +119,20 @@ def process(transcript_text: str, prior_state: dict | None = None, client=None) 
     new_meds = [_resolve_one(m, resolver) for m in ex.get("medicines") or []]
     merged = _merge_medicines(prior.get("medicines", []), new_meds)
 
+    state["medicines"] = merged
+    return validate_state(state)
+
+
+def validate_state(state: dict) -> dict:
+    """Recompute clinical verdicts, duplicates and approval blocking in place.
+
+    Called after every extraction pass and after every doctor edit. Locked
+    medicines keep their doctor-set status; only the deterministic clinical
+    fields are refreshed.
+    """
+    merged = state["medicines"]
     active = [m for m in merged if not m.get("deleted")]
-    validated = _validator_instance().validate(active, state["diagnosis"])
+    validated = _validator_instance().validate(active, state.get("diagnosis"))
     by_key = {m["med_key"]: m for m in validated["medicines"]}
     for m in merged:
         if m.get("deleted"):
@@ -131,7 +143,6 @@ def process(transcript_text: str, prior_state: dict | None = None, client=None) 
         if not m.get("locked"):
             m["status"] = v["status"]
 
-    state["medicines"] = merged
     state["conditions_matched"] = validated["conditions_matched"]
     state["duplicate_salts"] = validated["duplicate_salts"]
     blocked = [m["med_key"] for m in active if m["status"] == "RESOLVE"]

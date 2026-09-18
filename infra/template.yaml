@@ -8,11 +8,14 @@ Parameters:
     Default: dev
     AllowedPattern: "[a-z0-9]+"
     Description: Environment name; used in resource names and the SSM parameter prefix.
+  MantleModelId:
+    Type: String
+    Default: openai.gpt-oss-120b
 
 Globals:
   Function:
     Runtime: python3.12
-    Architectures: [arm64]
+    Architectures: [x86_64]
     Timeout: 10
     MemorySize: 256
     Environment:
@@ -108,6 +111,8 @@ Resources:
       Schema:
         - { Name: email, Required: true, Mutable: true }
         - { Name: name, Required: false, Mutable: true }
+        # Maps a Cognito user to a DOC#<doctorId> profile (custom:doctorId in the ID token).
+        - { Name: doctorId, AttributeDataType: String, Mutable: true }
 
   DoctorUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -115,7 +120,8 @@ Resources:
       ClientName: doctor-web
       UserPoolId: !Ref DoctorUserPool
       GenerateSecret: false
-      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      # ADMIN_USER_PASSWORD_AUTH is for scripts/cognito_doctor.py (dev token minting).
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
 
   PatientUserPool:
     Type: AWS::Cognito::UserPool
@@ -142,8 +148,16 @@ Resources:
       StageName: !Ref Env
       CorsConfiguration:
         AllowOrigins: ["*"]
-        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
         AllowHeaders: [Authorization, Content-Type]
+      Auth:
+        Authorizers:
+          DoctorJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${DoctorUserPool}
+              audience: [!Ref DoctorUserPoolClient]
+        DefaultAuthorizer: DoctorJwt
 
   HealthFunction:
     Type: AWS::Serverless::Function
@@ -169,6 +183,53 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /health
             Method: GET
+            Auth: { Authorizer: NONE }
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub medscribe-api-${Env}
+      CodeUri: ../backend
+      Handler: handlers.api.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          LLM_PROVIDER: mantle
+          MANTLE_MODEL_ID: !Ref MantleModelId
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+      Events:
+        Patients:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /patients, Method: GET }
+        Brands:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /brands, Method: GET }
+        CreateConsult:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /consults, Method: POST }
+        GetConsult:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}", Method: GET }
+        Transcript:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/transcript", Method: POST }
+        GetDraft:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/draft", Method: GET }
+        PatchDraft:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/draft", Method: PATCH }
+        Approve:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/approve", Method: POST }
 
 Outputs:
   ApiUrl:

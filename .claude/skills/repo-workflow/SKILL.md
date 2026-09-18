@@ -10,7 +10,8 @@ Bash) with forward slashes — not PowerShell. Run from the repo root unless sta
 
 ## Commands
 
-- Install: `.venv/Scripts/python.exe -m pip install -r backend/requirements.txt`
+- Install: `.venv/Scripts/python.exe -m pip install -r backend/requirements-dev.txt`
+  (`requirements.txt` is the Lambda runtime set only)
   (only if `.venv` is missing or requirements changed — don't reinstall speculatively)
 - Test: `.venv/Scripts/python.exe -m pytest -q backend`
 - Lint: `.venv/Scripts/python.exe -m ruff check backend` (add `--fix` for auto-fixes)

@@ -22,7 +22,14 @@ All bodies are JSON. Errors: `{ "error": "<message>" }` with a 4xx/5xx status.
 | `GET` | `/brands?q=<text>` | — | `{ "brand_id", "label", "salt_ids" }[]` (max 20) — for the RESOLVE picker |
 
 `GET /consults/{id}/draft` is polled every 3 s by the dashboard until the
-WebSocket lands (step 14).
+WebSocket lands (step 14). **Extraction runs inside that GET**: an append only marks
+the consult dirty; the next poll after `EXTRACTION_INTERVAL_SECONDS` (12 s) runs the
+pipeline and stores the draft, so one poll in ~four takes ~2 s longer. No queue needed.
+
+Auth is a Cognito JWT authoriser on the HTTP API (`/health` excluded). The doctorId is
+`custom:doctorId` from the token, falling back to `sub`. Mint a dev token with
+`python -m scripts.cognito_doctor --pool <id> --client <id> --email ... --password ...`
+and put it in `frontend/doctor/.env` as `VITE_ID_TOKEN`.
 
 ## Shapes
 
