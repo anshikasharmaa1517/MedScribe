@@ -2,6 +2,7 @@
 
 Full spec: `docs/CLAUDE_CODE_CONTEXT.md`. Extraction brief (done): `docs/BUILD_TASK_extraction_layer.md`.
 Infra: `infra/README.md` (deploy, secrets, seeding, **teardown checklist**).
+Step-by-step plan: `docs/BUILD_SEQUENCE.md` — **at step 6** (deploy + `/health` check pending).
 
 ## Workflow
 
