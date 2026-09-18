@@ -1,82 +1,94 @@
 """Extracts structured consultation data from a Hinglish transcript via the configured LLM.
 
+The system prompt lives in `prompts/extract_system.txt` so it can be iterated on
+without a code change. This module only owns the call and a defensive parse
+that pins the model's output to the schema in BUILD_TASK §Component 1.
+
 Never corrects or normalises a medicine name here - that is the resolver's job.
 Pre-correcting a spoken name destroys the signal the matcher needs to detect
-ASR errors, so the prompt drills the verbatim rule with a worked example
-(smaller models follow it less reliably than Claude without it).
+ASR errors, so `spoken_name` passes through untouched.
 """
-from core.llm import get_client
+import logging
+from functools import lru_cache
+from pathlib import Path
 
-SYSTEM_PROMPT = """You are a clinical transcription extraction engine. You read a
-doctor-patient consultation transcript in Hindi/English/Hinglish and extract
-structured data.
+from core.llm import LLMResponseError, get_client
+from core.settings import EXTRACT_MAX_TOKENS, EXTRACT_PROMPT_PATH
 
-Output ONLY valid JSON matching this exact schema, no other text:
+log = logging.getLogger(__name__)
 
-{
-  "symptoms": ["string"],
-  "diagnosis": "string or null",
-  "tests_advised": ["string"],
-  "medicines": [
-    {
-      "spoken_name": "string",
-      "frequency": "string or null",
-      "food_relation": "string or null",
-      "duration": "string or null"
-    }
-  ],
-  "next_visit": "string or null"
-}
+LIST_FIELDS = ("symptoms", "tests_advised")
+SCALAR_FIELDS = ("diagnosis", "next_visit")
+MED_FIELDS = ("frequency", "food_relation", "duration")
 
-RULES - follow exactly, do not deviate:
 
-1. "spoken_name" must be copied VERBATIM, character-for-character, from what was
-   said in the transcript. Do NOT correct spelling, do NOT normalise brand names,
-   do NOT expand abbreviations.
-   Example: transcript says "azithril 500" -> spoken_name is "azithril 500", NOT
-   "Azithral 500" and NOT "Azithromycin 500". The exact mispronunciation must
-   survive into your output. A downstream matching system depends on it to detect
-   transcription errors; correcting it here destroys that signal.
-
-2. NEVER output a medicine ID, brand ID, or any database identifier. You only
-   report what was said, nothing else.
-
-3. Leave fields empty (null or []) if not mentioned. NEVER invent a symptom,
-   diagnosis, test, or medicine that was not stated. An empty diagnosis is a
-   valid, common, and expected output - do not guess one to fill the slot.
-   Frequency, food_relation and duration belong ONLY to the medicine they were
-   spoken with. If the doctor gives a duration for one medicine and none for
-   the next, the second medicine's duration is null - never carry it over, and
-   never borrow the follow-up interval ("paanch din baad dikha dena") as a
-   duration. Inventing a duration puts a wrong instruction on a prescription.
-
-4. The transcript is Hinglish (code-mixed Hindi and English). Convert Hindi
-   dosage phrases to standard notation:
-   - "ek subah ek shaam" / "subah shaam" -> "1-0-1"
-   - "ek subah ek dopeher ek raat" -> "1-1-1"
-   - "khaane ke baad" / "khana khane ke baad" -> "after food"
-   - "khaane se pehle" -> "before food"
-   - a Hindi number word + "din" -> "<N> days" (e.g. "paanch din" -> "5 days")
-
-5. Preserve standard Indian prescription shorthand: OD, BD, TDS, QID, SOS, HS,
-   stat, or the numeric pattern "1-0-1" / "1-1-1" / "0-0-1". Only use one of
-   these when the doctor's phrasing maps to it unambiguously. Never invent a
-   frequency that wasn't stated.
-
-6. Output raw JSON only. No markdown code fences, no explanation, no preamble.
-
-7. If no medicines, symptoms, or tests were mentioned, return empty arrays for
-   those keys - never omit a key.
-
-8. Write "symptoms", "diagnosis" and "tests_advised" in English ("bukhar" ->
-   "fever", "pet dard" -> "stomach pain"). The verbatim rule applies to
-   "spoken_name" only."""
+@lru_cache(maxsize=1)
+def system_prompt() -> str:
+    return Path(EXTRACT_PROMPT_PATH).read_text(encoding="utf-8").strip()
 
 
 def build_user_message(transcript_text: str) -> str:
     return f"Transcript:\n{transcript_text}\n\nExtract the structured data now."
 
 
+def _scalar(value, field):
+    if value is None or isinstance(value, str):
+        return value or None
+    raise LLMResponseError(f"{field} must be a string or null, got {type(value).__name__}")
+
+
+def _str_list(value, field):
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise LLMResponseError(f"{field} must be a list, got {type(value).__name__}")
+    if not all(isinstance(v, str) for v in value):
+        raise LLMResponseError(f"{field} must contain only strings")
+    return [v.strip() for v in value if v.strip()]
+
+
+def _medicine(raw, index):
+    if not isinstance(raw, dict):
+        raise LLMResponseError(f"medicines[{index}] must be an object")
+    spoken = raw.get("spoken_name")
+    if not isinstance(spoken, str) or not spoken.strip():
+        raise LLMResponseError(f"medicines[{index}] has no spoken_name")
+    # Rule 1: the LLM never sets an identifier. Anything id-shaped is discarded
+    # here so nothing downstream can ever read it, even by accident.
+    ids = [k for k in raw if k not in ("spoken_name", *MED_FIELDS)]
+    if ids:
+        log.warning("extractor discarded unexpected medicine keys %s", ids)
+    med = {"spoken_name": spoken.strip()}
+    for f in MED_FIELDS:
+        med[f] = _scalar(raw.get(f), f"medicines[{index}].{f}")
+    return med
+
+
+def normalise(payload) -> dict:
+    """Coerce model output onto the exact extraction schema or raise LLMResponseError.
+
+    Raising (rather than dropping the bad part) is what lets the glue fall back
+    to the previous good state - a half-parsed draft is worse than a stale one.
+    """
+    if not isinstance(payload, dict):
+        raise LLMResponseError(f"extraction must be a JSON object, got {type(payload).__name__}")
+    out = {}
+    for f in LIST_FIELDS:
+        out[f] = _str_list(payload.get(f), f)
+    for f in SCALAR_FIELDS:
+        out[f] = _scalar(payload.get(f), f)
+    meds = payload.get("medicines")
+    if meds is None:
+        meds = []
+    if not isinstance(meds, list):
+        raise LLMResponseError(f"medicines must be a list, got {type(meds).__name__}")
+    out["medicines"] = [_medicine(m, i) for i, m in enumerate(meds)]
+    return out
+
+
 def extract(transcript_text: str, client=None) -> dict:
     client = client or get_client()
-    return client.converse_json(SYSTEM_PROMPT, build_user_message(transcript_text))
+    raw = client.converse_json(
+        system_prompt(), build_user_message(transcript_text), max_tokens=EXTRACT_MAX_TOKENS
+    )
+    return normalise(raw)

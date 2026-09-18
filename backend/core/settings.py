@@ -30,3 +30,10 @@ BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL_ID = os.environ.get("GEMINI_MODEL_ID", "gemini-3.6-flash")
+
+# Extraction call. The prompt lives in a text file so it can be tuned without a
+# code change; the token cap is deliberately low because this runs every 10-15s.
+EXTRACT_PROMPT_PATH = os.environ.get(
+    "MEDSCRIBE_EXTRACT_PROMPT", str(BACKEND_DIR / "core" / "prompts" / "extract_system.txt")
+)
+EXTRACT_MAX_TOKENS = int(os.environ.get("MEDSCRIBE_EXTRACT_MAX_TOKENS", "1024"))
