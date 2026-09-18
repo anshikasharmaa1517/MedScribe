@@ -45,3 +45,23 @@ aws ssm put-parameter --name /medscribe/dev/BEDROCK_API_KEY   --type SecureStrin
 After deploy, from `backend/` with `MEDSCRIBE_TABLE` etc. set to the deployed names
 (see stack outputs): `python -m scripts.seed_reference_tables` then
 `python -m scripts.seed_demo_data`.
+
+## Teardown (after results)
+
+`sam delete` alone is not enough - the table and bucket are `Retain`ed so a bad deploy
+can't destroy patient data. Full checklist, all in `ap-south-1` unless noted:
+
+```
+cd infra
+sam delete --stack-name medscribe-dev                                # Lambda, API, Cognito, ref tables
+aws s3 rm s3://medscribe-dev-<account-id> --recursive                # bucket must be empty first
+aws s3 rb s3://medscribe-dev-<account-id>
+aws dynamodb delete-table --table-name medscribe-dev                 # retained app table
+aws logs delete-log-group --log-group-name /aws/lambda/medscribe-health-dev
+aws ssm delete-parameters --names /medscribe/dev/SARVAM_API_KEY /medscribe/dev/TWILIO_AUTH_TOKEN /medscribe/dev/BEDROCK_API_KEY
+aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default   # SAM's own deploy bucket stack
+```
+
+Then in the console: Bedrock -> API keys (revoke the Mantle key), IAM -> user `anai`
+(delete access keys, remove AdministratorAccess), and Twilio -> release the sandbox.
+Check Billing -> Bills a day later to confirm nothing is still metering.
