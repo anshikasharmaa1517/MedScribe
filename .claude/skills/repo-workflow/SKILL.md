@@ -5,20 +5,24 @@ description: Run MedScribe's install/test/lint/push loop without re-deriving the
 
 # MedScribe repo workflow
 
-Backend lives in `backend/`, venv at `.venv/` (repo root). Windows/PowerShell primary.
+Backend lives in `backend/`, venv at `.venv/` (repo root). Use the **Bash tool** (Git
+Bash) with forward slashes — not PowerShell. Run from the repo root unless stated.
 
 ## Commands
 
-- Install: `& ".venv\Scripts\python.exe" -m pip install -r backend\requirements.txt`
+- Install: `.venv/Scripts/python.exe -m pip install -r backend/requirements.txt`
   (only if `.venv` is missing or requirements changed — don't reinstall speculatively)
-- Test: `& ".venv\Scripts\python.exe" -m pytest -q backend`
-- Lint: `& ".venv\Scripts\python.exe" -m ruff check backend`
-- Rebuild seed artifacts (only after editing a seed CSV):
-  `& ".venv\Scripts\python.exe" -m scripts.build_phonetic` then `build_hotwords`,
-  run from inside `backend/`
-- Seed DynamoDB (from `backend/`; add `--endpoint-url http://localhost:8000` for DynamoDB
-  Local, `--create` to create tables): `python -m scripts.seed_reference_tables` then
-  `python -m scripts.seed_demo_data`. Store tests use moto — never real AWS.
+- Test: `.venv/Scripts/python.exe -m pytest -q backend`
+- Lint: `.venv/Scripts/python.exe -m ruff check backend` (add `--fix` for auto-fixes)
+- Rebuild seed artifacts (only after editing a seed CSV), from `backend/`:
+  `../.venv/Scripts/python.exe -m scripts.build_phonetic && ../.venv/Scripts/python.exe -m scripts.build_hotwords`
+- Seed DynamoDB, from `backend/` (add `--endpoint-url http://localhost:8000` for DynamoDB
+  Local, `--create` to create tables):
+  `../.venv/Scripts/python.exe -m scripts.seed_reference_tables && ../.venv/Scripts/python.exe -m scripts.seed_demo_data`.
+  Store tests use moto — never real AWS.
+- Load `.env` for a one-off script (repo root): `export $(grep -E '^[A-Z_]+=' .env | xargs)`
+- SAM (from `infra/`): `../.venv/Scripts/sam.exe build`, `../.venv/Scripts/sam.exe deploy`.
+  Deploy creates real resources — hand the command to the user rather than running it.
 
 ## Push policy
 
