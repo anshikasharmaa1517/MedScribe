@@ -40,6 +40,11 @@ def _scalar(value, field):
 def _str_list(value, field):
     if value is None:
         return []
+    if isinstance(value, str):
+        # Models occasionally collapse a one-item list to a bare string. That is a
+        # shape slip, not bad content; failing the whole pass over it would freeze
+        # the draft mid-consult.
+        return [v.strip() for v in value.split(",") if v.strip()]
     if not isinstance(value, list):
         raise LLMResponseError(f"{field} must be a list, got {type(value).__name__}")
     if not all(isinstance(v, str) for v in value):

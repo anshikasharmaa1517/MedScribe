@@ -177,7 +177,6 @@ def test_model_emitted_identifiers_are_stripped():
         {"medicines": [{"frequency": "1-0-1"}]},  # no spoken_name
         {"medicines": [{"spoken_name": ""}]},  # blank spoken_name
         {"medicines": [{"spoken_name": "Dolo 650", "duration": 5}]},  # wrong type
-        {"symptoms": "fever"},  # list field given as string
         {"symptoms": [{"name": "fever"}]},  # list item not a string
         {"diagnosis": ["Viral fever"]},  # scalar given as list
     ],
@@ -186,6 +185,13 @@ def test_malformed_shape_raises_instead_of_partial_output(payload):
     # The glue relies on this to keep the previous good state (fail-safe rule).
     with pytest.raises(LLMResponseError):
         extractor.normalise(payload)
+
+
+def test_bare_string_for_list_field_is_coerced_not_fatal():
+    # Seen live from gpt-oss-120b: "tests_advised": "CBC". A shape slip must not
+    # freeze the draft for the rest of the consult.
+    out = extractor.normalise({"tests_advised": "CBC", "symptoms": "fever, body pain"})
+    assert out["tests_advised"] == ["CBC"] and out["symptoms"] == ["fever", "body pain"]
 
 
 def test_blank_strings_become_null_and_empty_list_items_are_dropped():
