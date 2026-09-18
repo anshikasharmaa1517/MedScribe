@@ -16,6 +16,9 @@ Backend lives in `backend/`, venv at `.venv/` (repo root). Windows/PowerShell pr
 - Rebuild seed artifacts (only after editing a seed CSV):
   `& ".venv\Scripts\python.exe" -m scripts.build_phonetic` then `build_hotwords`,
   run from inside `backend/`
+- Seed DynamoDB (from `backend/`; add `--endpoint-url http://localhost:8000` for DynamoDB
+  Local, `--create` to create tables): `python -m scripts.seed_reference_tables` then
+  `python -m scripts.seed_demo_data`. Store tests use moto — never real AWS.
 
 ## Push policy
 

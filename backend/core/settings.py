@@ -23,6 +23,14 @@ MIN_MARGIN = int(os.environ.get("MEDSCRIBE_MIN_MARGIN", 6))  # must beat 2nd by 
 # Live loop: seconds between re-extractions of the accumulated transcript.
 EXTRACTION_INTERVAL_SECONDS = int(os.environ.get("MEDSCRIBE_EXTRACTION_INTERVAL", 12))
 
+# DynamoDB. One app table (single-table design, spec §7) plus three reference tables.
+# DYNAMODB_ENDPOINT_URL points at DynamoDB Local for dev; unset in Lambda.
+MEDSCRIBE_TABLE = os.environ.get("MEDSCRIBE_TABLE", "medscribe")
+BRANDS_TABLE = os.environ.get("BRANDS_TABLE", "brands")
+SALTS_TABLE = os.environ.get("SALTS_TABLE", "salts")
+CONDITIONS_TABLE = os.environ.get("CONDITIONS_TABLE", "conditions")
+DYNAMODB_ENDPOINT_URL = os.environ.get("DYNAMODB_ENDPOINT_URL") or None
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mantle")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
