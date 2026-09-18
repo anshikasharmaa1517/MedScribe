@@ -7,6 +7,9 @@ Full spec: `docs/CLAUDE_CODE_CONTEXT.md`. Current build task: `docs/BUILD_TASK_e
 Work on `main` and push directly to it. No feature branches, no pull requests —
 the repo owner reviews by pulling. Hackathon pace, single author.
 
+Commit messages: clean and short (a single summary line is fine), no Claude/AI
+attribution or co-author lines.
+
 ## The seven non-negotiables
 
 1. The LLM **never** sets `brand_id`. Only `resolver.py` does.
