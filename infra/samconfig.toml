@@ -1,0 +1,19 @@
+version = 0.1
+
+[default.global.parameters]
+region = "ap-south-1"
+stack_name = "medscribe-dev"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = "Env=dev"
+disable_rollback = false
+
+[default.validate.parameters]
+lint = true

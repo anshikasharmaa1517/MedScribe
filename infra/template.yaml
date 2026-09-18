@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: MedScribe - ambient AI scribe for Indian clinics (ap-south-1)
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedPattern: "[a-z0-9]+"
+    Description: Environment name; used in resource names and the SSM parameter prefix.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        ENV: !Ref Env
+        MEDSCRIBE_TABLE: !Ref MedscribeTable
+        BRANDS_TABLE: !Ref BrandsTable
+        SALTS_TABLE: !Ref SaltsTable
+        CONDITIONS_TABLE: !Ref ConditionsTable
+        MEDSCRIBE_BUCKET: !Ref MedscribeBucket
+        # Secrets (Sarvam, Twilio, Bedrock API key) are read at runtime from
+        # SSM Parameter Store under this prefix - never set here.
+        SSM_PREFIX: !Sub /medscribe/${Env}
+
+Resources:
+  # ---------------------------------------------------------------- data
+  MedscribeTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub medscribe-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: PK, AttributeType: S }
+        - { AttributeName: SK, AttributeType: S }
+        - { AttributeName: doctorId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: PK, KeyType: HASH }
+        - { AttributeName: SK, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - { AttributeName: doctorId, KeyType: HASH }
+            - { AttributeName: SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false }
+
+  BrandsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub brands-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: brand_id, AttributeType: S }]
+      KeySchema: [{ AttributeName: brand_id, KeyType: HASH }]
+
+  SaltsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub salts-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: salt_id, AttributeType: S }]
+      KeySchema: [{ AttributeName: salt_id, KeyType: HASH }]
+
+  ConditionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub conditions-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: condition_id, AttributeType: S }]
+      KeySchema: [{ AttributeName: condition_id, KeyType: HASH }]
+
+  MedscribeBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub medscribe-${Env}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-audio
+            Status: Enabled
+            Prefix: audio/
+            ExpirationInDays: 30
+
+  # ---------------------------------------------------------------- auth
+  DoctorUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub medscribe-doctors-${Env}
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy: { MinimumLength: 8 }
+      Schema:
+        - { Name: email, Required: true, Mutable: true }
+        - { Name: name, Required: false, Mutable: true }
+
+  DoctorUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: doctor-web
+      UserPoolId: !Ref DoctorUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+
+  PatientUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub medscribe-patients-${Env}
+      UsernameAttributes: [phone_number]
+      Policies:
+        PasswordPolicy: { MinimumLength: 8 }
+      Schema:
+        - { Name: phone_number, Required: true, Mutable: true }
+
+  PatientUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: patient-web
+      UserPoolId: !Ref PatientUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+
+  # ---------------------------------------------------------------- api
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Env
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowHeaders: [Authorization, Content-Type]
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub medscribe-health-${Env}
+      CodeUri: ../backend/handlers
+      Handler: health.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:DescribeTable
+              Resource: !GetAtt MedscribeTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
+  HealthUrl:
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/health
+  TableName:
+    Value: !Ref MedscribeTable
+  BucketName:
+    Value: !Ref MedscribeBucket
+  DoctorUserPoolId:
+    Value: !Ref DoctorUserPool
+  DoctorUserPoolClientId:
+    Value: !Ref DoctorUserPoolClient
+  PatientUserPoolId:
+    Value: !Ref PatientUserPool
+  PatientUserPoolClientId:
+    Value: !Ref PatientUserPoolClient
+  SsmPrefix:
+    Value: !Sub /medscribe/${Env}
