@@ -5,33 +5,26 @@ malformed output — the extractor relies on that to fall back to its previous
 good state instead of corrupting the draft.
 """
 import json
-import re
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from core.llm import LLMAPIError, LLMError, LLMResponseError, strip_fences  # noqa: F401
 from core.settings import AWS_REGION, BEDROCK_MODEL_ID
 
 DEFAULT_MAX_TOKENS = 1500
 
-_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
-
-class BedrockError(Exception):
+class BedrockError(LLMError):
     """Base class for every error raised by this module."""
 
 
-class BedrockAPIError(BedrockError):
+class BedrockAPIError(BedrockError, LLMAPIError):
     """The call to Bedrock failed (auth, throttling, model access, network)."""
 
 
-class BedrockResponseError(BedrockError):
+class BedrockResponseError(BedrockError, LLMResponseError):
     """Bedrock answered, but the content is not usable JSON."""
-
-
-def strip_fences(text: str) -> str:
-    match = _FENCE.search(text)
-    return (match.group(1) if match else text).strip()
 
 
 class BedrockClient:
