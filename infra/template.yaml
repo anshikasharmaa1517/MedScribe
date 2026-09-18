@@ -158,7 +158,10 @@ Resources:
               Resource: !GetAtt MedscribeTable.Arn
             - Effect: Allow
               Action: ssm:GetParametersByPath
-              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+              # GetParametersByPath is authorised on the path itself, not only its children.
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
       Events:
         Health:
           Type: HttpApi
