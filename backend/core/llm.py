@@ -38,4 +38,8 @@ def get_client(provider: str | None = None):
         from core.bedrock_client import BedrockClient
 
         return BedrockClient()
-    raise LLMError(f"unknown LLM_PROVIDER {provider!r}; expected 'gemini' or 'bedrock'")
+    if provider == "mantle":
+        from core.mantle_client import MantleClient
+
+        return MantleClient()
+    raise LLMError(f"unknown LLM_PROVIDER {provider!r}; expected 'gemini', 'bedrock' or 'mantle'")

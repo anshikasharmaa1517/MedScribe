@@ -23,13 +23,18 @@ MIN_MARGIN = int(os.environ.get("MEDSCRIBE_MIN_MARGIN", 6))  # must beat 2nd by 
 # Live loop: seconds between re-extractions of the accumulated transcript.
 EXTRACTION_INTERVAL_SECONDS = int(os.environ.get("MEDSCRIBE_EXTRACTION_INTERVAL", 12))
 
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini")
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mantle")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL_ID = os.environ.get("GEMINI_MODEL_ID", "gemini-3.6-flash")
+
+# Bedrock Mantle: OpenAI-compatible endpoint with a bearer key (Bedrock console -> API keys).
+BEDROCK_API_KEY = os.environ.get("BEDROCK_API_KEY", "")
+BEDROCK_MANTLE_URL = os.environ.get("BEDROCK_MANTLE_URL", "https://bedrock-mantle.ap-south-1.api.aws/v1")
+MANTLE_MODEL_ID = os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b")
 
 # Extraction call. The prompt lives in a text file so it can be tuned without a
 # code change; the token cap is deliberately low because this runs every 10-15s.
