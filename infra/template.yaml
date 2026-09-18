@@ -121,7 +121,11 @@ Resources:
       UserPoolId: !Ref DoctorUserPool
       GenerateSecret: false
       # ADMIN_USER_PASSWORD_AUTH is for scripts/cognito_doctor.py (dev token minting).
-      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH      # browser login screen (no SDK)
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
 
   PatientUserPool:
     Type: AWS::Cognito::UserPool

@@ -87,3 +87,9 @@ select { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); bor
 .btn.small { padding: .25rem .55rem; font-size: .8rem; }
 .btn.large { padding: .7rem 1.4rem; font-size: 1.05rem; }
 .approve-bar { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: .75rem; margin-top: .5rem; }
+
+.login { display: grid; place-items: center; min-height: 100vh; }
+.login-card { width: min(420px, 100%); display: grid; gap: .6rem; }
+.login-card h1 { margin-bottom: 0; }
+.login-card .btn { margin-top: .5rem; }
+.sessionbar { max-width: 1280px; margin: 0 auto; padding: .4rem 1rem 0; display: flex; justify-content: flex-end; gap: .75rem; align-items: center; font-size: .85rem; }
