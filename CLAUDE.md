@@ -1,6 +1,7 @@
 # MedScribe — house rules
 
-Full spec: `docs/CLAUDE_CODE_CONTEXT.md`. Current build task: `docs/BUILD_TASK_extraction_layer.md`.
+Full spec: `docs/CLAUDE_CODE_CONTEXT.md`. Extraction brief (done): `docs/BUILD_TASK_extraction_layer.md`.
+Infra: `infra/README.md` (deploy, secrets, seeding, **teardown checklist**).
 
 ## Workflow
 
@@ -64,9 +65,23 @@ them, write a contract test pinning current behaviour first.
 - **`frequency`** → free string, preferred set `1-0-1` / `1-1-1` / OD / BD / TDS / QID /
   SOS / HS / stat. The schema enum in the spec is narrower than its own prompt rules.
 - **`locked`** → included in the draft output, per §6, though `BUILD_TASK` omits it.
-- **Bedrock** → verify model access in `ap-south-1` before writing the extractor.
-  Model ID comes from `BEDROCK_MODEL_ID`, never hardcoded. Structured output via
-  Converse API tool use, with a defensive parse.
+- **LLM provider** → `LLM_PROVIDER` in `core/settings.py` selects `mantle` (default),
+  `gemini` or `bedrock`; all three expose `converse_json(system, user)` and raise the
+  `LLMError` family from `core/llm.py`. Extractor and pipeline never know which one.
+  - `mantle` = Bedrock's OpenAI-compatible endpoint (`bedrock-mantle.ap-south-1`,
+    bearer key from Bedrock console → API keys). Model `openai.gpt-oss-120b`: the only
+    one of five tested with zero rule violations on Hinglish transcripts, ~1.7 s/call.
+    Data retention set to "none" at account level. **This is the production path.**
+  - `bedrock` = Converse API via IAM. Blocked on this account
+    (`ValidationException: Operation not allowed`, every model, every region — new-account
+    gate; support case pending). Code is ready; flip the env var when it lifts.
+  - `gemini` = Google AI Studio free tier, `gemini-3.6-flash` (2.5 is retired for new
+    keys). Works, ~4.7 s/call. Fallback only; free tier may train on inputs.
+- **Extraction prompt** → lives in `core/prompts/extract_system.txt`, not in code, so it
+  can be tuned during rehearsal. `extractor.normalise()` strips any id the model emits
+  and pins the schema; `spoken_name` passes through untouched.
+- **Resolver quirk** → `alternatives` is `scored[1:4]`, so a `RESOLVE` item's top
+  candidate is not in the output at all. Fix in the glue/dashboard layer, not resolver.
 - **Condition matching** → stays naive substring for the demo, despite `"gas"` and
   `"BP"` over-matching.
 
@@ -76,15 +91,37 @@ them, write a contract test pinning current behaviour first.
 own Tier 0 definition nothing is verified yet. Referential integrity is clean; 5 salts
 have no brand, 2 have no condition mapping.
 
+## What exists (as of 2026-09-19)
+
+- `core/extractor.py` + `core/prompts/extract_system.txt` — `extract(transcript) -> dict`.
+- `core/pipeline.py` — `process(transcript, prior_state=None) -> dict`; merge, locking,
+  tombstones, `blocks_approval`, fail-safe to prior state on `LLMError`.
+- `core/llm.py`, `core/mantle_client.py`, `core/gemini_client.py`, `core/bedrock_client.py`.
+- `core/store.py` — single-table DynamoDB layer (§7) + three reference tables;
+  `scripts/seed_reference_tables.py`, `scripts/seed_demo_data.py` (Dr. Meera Krishnan,
+  `doc-demo-meera`; patients `pat-demo-001..003` with 8 prior prescriptions that pass the
+  validator clean). Tests use moto — never real AWS.
+- `infra/template.yaml` + `samconfig.toml` — table + GSI1, reference tables, S3, two
+  Cognito pools, HTTP API, `GET /health`. Validated and built; **not yet deployed**.
+- 89 tests, all offline. `.claude/skills/medscribe-review` reviews diffs against the
+  seven rules.
+
 ## Build order
 
-1. Extraction + glue layer ← **current**
-2. Doctor dashboard
+1. Extraction + glue layer ✅
+2. Doctor dashboard ← **next**
 3. Twilio inbound + outbound
 4. Step Functions pipeline
 5. Reminders
 6. Patient dashboard + history chat
 7. Alexa (only if everything above is done)
 
-Do first, regardless: verify Bedrock access in ap-south-1, send one WhatsApp message
-end to end, submit the reminder template for approval. All three have external latency.
+Do first, regardless: send one WhatsApp message end to end, submit the reminder
+template for approval. Both have external latency. (Bedrock access: resolved via Mantle.)
+
+## AWS account
+
+Account `383688933731`, region `ap-south-1`, IAM user `anai` (has `AdministratorAccess`
+only so `sam deploy` works — remove after). Hard budget **$100**; everything deployed
+is on-demand/free-tier. **Tear everything down after results** — checklist in
+`infra/README.md`.
