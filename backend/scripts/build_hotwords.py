@@ -3,8 +3,10 @@ Run this whenever the seed CSVs change so ASR and matcher never drift apart.
 """
 import csv, json
 
-brands = list(csv.DictReader(open('seed_brands.csv')))
-salts  = list(csv.DictReader(open('seed_salts.csv')))
+from core.settings import BRANDS_CSV, HOTWORDS_JSON, SALTS_CSV
+
+brands = list(csv.DictReader(open(BRANDS_CSV)))
+salts  = list(csv.DictReader(open(SALTS_CSV)))
 
 words = []
 
@@ -31,6 +33,6 @@ for w in words:
         seen.add(k)
         out.append(w)
 
-json.dump(out, open('hotwords.json', 'w'), indent=1, ensure_ascii=False)
+json.dump(out, open(HOTWORDS_JSON, 'w'), indent=1, ensure_ascii=False)
 print(f"{len(out)} hotwords written")
 print("sample:", out[:8], "...", out[-6:])

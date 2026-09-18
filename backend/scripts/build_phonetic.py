@@ -5,6 +5,8 @@ India-specific normalisation before Double Metaphone, so ASR variants
 import csv, re
 from metaphone import doublemetaphone
 
+from core.settings import BRANDS_CSV
+
 def normalise(name):
     n = name.lower()
     n = re.sub(r'ph', 'f', n)
@@ -15,14 +17,14 @@ def normalise(name):
     n = re.sub(r'([aeiou])\1+', r'\1', n)  # collapse doubled vowels
     return n
 
-rows = list(csv.DictReader(open('seed_brands.csv')))
+rows = list(csv.DictReader(open(BRANDS_CSV)))
 out_fields = list(rows[0].keys())
 out_fields.insert(out_fields.index('aliases'), 'phonetic_key')
 
 for r in rows:
     r['phonetic_key'] = doublemetaphone(normalise(r['base_brand']))[0]
 
-with open('seed_brands.csv', 'w', newline='') as f:
+with open(BRANDS_CSV, 'w', newline='') as f:
     w = csv.DictWriter(f, fieldnames=out_fields)
     w.writeheader()
     w.writerows(rows)

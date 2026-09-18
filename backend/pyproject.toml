@@ -1,0 +1,23 @@
+[project]
+name = "medscribe-backend"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+# core/resolver.py and core/validator.py are vendored verbatim and must not be
+# reformatted. Only their CSV path defaults were parameterised; style stays as-is.
+[tool.ruff.lint.per-file-ignores]
+"core/resolver.py" = ["E401", "E501", "F401", "I001"]
+"core/validator.py" = ["E501", "I001"]
+"scripts/build_phonetic.py" = ["E401", "E402", "I001"]
+"scripts/build_hotwords.py" = ["E401", "I001"]

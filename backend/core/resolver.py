@@ -12,6 +12,8 @@ import csv, re, json
 from rapidfuzz import fuzz, process
 from metaphone import doublemetaphone
 
+from core.settings import BRANDS_CSV
+
 # ---------------------------------------------------------------- thresholds
 AUTO_SCORE   = 88   # top candidate must beat this to auto-fill
 MIN_SCORE    = 62   # below this we don't guess at all
@@ -68,7 +70,7 @@ def parse_spoken(text: str) -> dict:
 
 
 class Resolver:
-    def __init__(self, brands_csv='seed_brands.csv'):
+    def __init__(self, brands_csv=BRANDS_CSV):
         self.brands = list(csv.DictReader(open(brands_csv)))
         self.buckets = {}
         self.lookup = {}          # exact alias -> row

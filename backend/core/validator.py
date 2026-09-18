@@ -12,6 +12,8 @@ Rules that matter:
 import csv
 from collections import defaultdict
 
+from core.settings import CONDITIONS_CSV, SALTS_CSV
+
 # Known look-alike / sound-alike salt pairs. Seed from ISMP list + Indian pairs.
 # If two candidates for one spoken mention fall in the same pair, force CONFIRM
 # regardless of score.
@@ -28,7 +30,7 @@ LASA_PAIRS = {
 
 
 class Validator:
-    def __init__(self, salts_csv='seed_salts.csv', conds_csv='seed_conditions.csv'):
+    def __init__(self, salts_csv=SALTS_CSV, conds_csv=CONDITIONS_CSV):
         self.salts = {s['salt_id']: s for s in csv.DictReader(open(salts_csv))}
         self.conds = {c['condition_id']: c for c in csv.DictReader(open(conds_csv))}
         # synonym -> condition_ids (one synonym can map to several, e.g. "gas")
@@ -111,7 +113,7 @@ class Validator:
 
 
 if __name__ == '__main__':
-    from resolver import Resolver
+    from core.resolver import Resolver
     r, v = Resolver(), Validator()
 
     scenarios = [
