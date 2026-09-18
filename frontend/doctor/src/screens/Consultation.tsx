@@ -12,6 +12,7 @@ type Props = { patient: Patient; onBack: () => void };
 export function Consultation({ patient, onBack }: Props) {
   const [consult, setConsult] = useState<Consult | null>(null);
   const [lines, setLines] = useState<TranscriptLine[]>([]);
+  const [partial, setPartial] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [recording, setRecording] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -53,8 +54,8 @@ export function Consultation({ patient, onBack }: Props) {
   }, [consult]);
 
   const toggleRecording = async () => {
-    if (recording) { source.current.stop(); setRecording(false); return; }
-    try { await source.current.start(onLine); setRecording(true); }
+    if (recording) { source.current.stop(); setRecording(false); setPartial(""); return; }
+    try { await source.current.start(onLine, setPartial); setRecording(true); }
     catch (e) { setError(String((e as Error).message ?? e)); }
   };
 
@@ -92,7 +93,7 @@ export function Consultation({ patient, onBack }: Props) {
       </header>
       {error && <p className="error" onClick={() => setError(null)}>{error} (tap to dismiss)</p>}
       <div className="split">
-        <Transcript lines={lines} recording={recording} onToggleRecording={toggleRecording} onSwapSpeaker={swapSpeaker} />
+        <Transcript lines={lines} partial={partial} recording={recording} onToggleRecording={toggleRecording} onSwapSpeaker={swapSpeaker} />
         <DraftPanel draft={draft} onPatch={patch} onApprove={approve} approving={approving} approved={approved} />
       </div>
     </main>

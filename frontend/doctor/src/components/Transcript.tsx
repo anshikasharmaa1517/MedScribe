@@ -3,6 +3,7 @@ import type { Speaker, TranscriptLine } from "../types";
 
 type Props = {
   lines: TranscriptLine[];
+  partial?: string;
   recording: boolean;
   onToggleRecording: () => void;
   onSwapSpeaker: (seq: number, speaker: Speaker) => void;
@@ -10,9 +11,9 @@ type Props = {
 
 const NEXT: Record<string, Speaker> = { doctor: "patient", patient: "doctor", null: "doctor" };
 
-export function Transcript({ lines, recording, onToggleRecording, onSwapSpeaker }: Props) {
+export function Transcript({ lines, partial, recording, onToggleRecording, onSwapSpeaker }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [lines.length]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [lines.length, partial]);
 
   return (
     <section className="panel transcript">
@@ -36,6 +37,7 @@ export function Transcript({ lines, recording, onToggleRecording, onSwapSpeaker 
             <span className="text">{l.text}</span>
           </div>
         ))}
+        {partial && <div className="line partial"><span className="tag unknown">…</span><span className="text">{partial}</span></div>}
         <div ref={endRef} />
       </div>
     </section>
