@@ -31,7 +31,7 @@ exempt from lint reformatting in `pyproject.toml`. The only changes made to them
 
 | File | Change |
 |---|---|
-| `core/resolver.py` | added `from core.settings import BRANDS_CSV`; `__init__` default `'seed_brands.csv'` → `BRANDS_CSV` |
+| `core/resolver.py` | added `from core.settings import BRANDS_CSV, AUTO_SCORE, MIN_SCORE, MIN_MARGIN`; `__init__` default `'seed_brands.csv'` → `BRANDS_CSV`; the three threshold constants deleted (now read from settings, pinned by `tests/test_resolver_contract.py`) |
 | `core/validator.py` | added `from core.settings import CONDITIONS_CSV, SALTS_CSV`; `__init__` defaults → those constants; `__main__` import → `from core.resolver import Resolver` |
 
 No matching, scoring or clinical logic was touched. Before changing anything else in
@@ -49,9 +49,11 @@ them, write a contract test pinning current behaviour first.
 - **Merge policy** → union with tombstones. A medicine the LLM stops emitting
   persists (rule 3); one the doctor explicitly deletes stays deleted. Idempotency
   means `f(transcript, prior_state)` is deterministic, not that output ignores state.
-- **Thresholds** → `AUTO_SCORE` / `MIN_SCORE` / `MIN_MARGIN` move to `core/settings.py`
-  in the next step, behind contract tests. `MIN_SCORE` then goes 62 → 72 so a nonsense
-  name returns `RESOLVE` rather than `CONFIRM` (spec §11, and acceptance test 6 needs it).
+- **Thresholds** → `AUTO_SCORE` / `MIN_SCORE` / `MIN_MARGIN` and
+  `EXTRACTION_INTERVAL_SECONDS` live in `core/settings.py`, env-overridable. `MIN_SCORE`
+  is 72 (was 62) so a nonsense name returns `RESOLVE` rather than `CONFIRM` — at 62,
+  `paracetamol` resolved to Stamlo 5mg (a BP drug) as `CONFIRM`. Done, behind
+  `tests/test_resolver_contract.py`.
 - **LASA flag** → the demo's centrepiece currently cannot fire. `LASA_PAIRS` is dead
   code, Amiloride (S073) has no `condition_ids` so it returns `UNKNOWN` not
   `CONTRADICTS`, and Amlodipine is in a different phonetic bucket so it never appears

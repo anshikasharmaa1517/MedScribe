@@ -5,8 +5,8 @@ deterministically; the resolver and validator are real.
 """
 import pytest
 
-from core.glue import process
 from core.llm import LLMAPIError
+from core.pipeline import process
 
 
 class StubLLM:

@@ -1,4 +1,4 @@
-"""Glue layer: transcript -> extract -> resolve -> validate -> draft state.
+"""Pipeline: transcript -> extract -> resolve -> validate -> draft state.
 
 `process()` is a pure function of (transcript, prior_state); the caller owns
 persistence. Each extraction pass re-reads the whole transcript, so the merge

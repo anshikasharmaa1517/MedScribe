@@ -12,12 +12,7 @@ import csv, re, json
 from rapidfuzz import fuzz, process
 from metaphone import doublemetaphone
 
-from core.settings import BRANDS_CSV
-
-# ---------------------------------------------------------------- thresholds
-AUTO_SCORE   = 88   # top candidate must beat this to auto-fill
-MIN_SCORE    = 62   # below this we don't guess at all
-MIN_MARGIN   = 6    # top must beat 2nd by this much, else CONFIRM
+from core.settings import BRANDS_CSV, AUTO_SCORE, MIN_SCORE, MIN_MARGIN
 
 NUM_WORDS = {
     'zero':'0','one':'1','two':'2','three':'3','four':'4','five':'5',

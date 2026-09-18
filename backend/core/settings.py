@@ -15,6 +15,14 @@ SALTS_CSV = os.environ.get("MEDSCRIBE_SALTS_CSV", str(DATA_DIR / "seed_salts.csv
 CONDITIONS_CSV = os.environ.get("MEDSCRIBE_CONDITIONS_CSV", str(DATA_DIR / "seed_conditions.csv"))
 HOTWORDS_JSON = os.environ.get("MEDSCRIBE_HOTWORDS_JSON", str(DATA_DIR / "hotwords.json"))
 
+# Resolver thresholds (0-100 fuzzy scores). Tuned during demo rehearsal.
+AUTO_SCORE = int(os.environ.get("MEDSCRIBE_AUTO_SCORE", 88))  # top must beat this to auto-fill
+MIN_SCORE = int(os.environ.get("MEDSCRIBE_MIN_SCORE", 72))  # below this: RESOLVE, don't guess
+MIN_MARGIN = int(os.environ.get("MEDSCRIBE_MIN_MARGIN", 6))  # must beat 2nd by this, else CONFIRM
+
+# Live loop: seconds between re-extractions of the accumulated transcript.
+EXTRACTION_INTERVAL_SECONDS = int(os.environ.get("MEDSCRIBE_EXTRACTION_INTERVAL", 12))
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
