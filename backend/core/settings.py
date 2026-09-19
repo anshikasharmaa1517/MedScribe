@@ -44,15 +44,17 @@ BEDROCK_API_KEY = os.environ.get("BEDROCK_API_KEY", "")
 BEDROCK_MANTLE_URL = os.environ.get("BEDROCK_MANTLE_URL", "https://bedrock-mantle.ap-south-1.api.aws/v1")
 MANTLE_MODEL_ID = os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b")
 
-# Twilio WhatsApp. DRY_RUN defaults on: the sandbox allows 100 messages total, so a
-# real send is an explicit decision, never a default. The sandbox number is shared
-# by every Twilio account; the join code is per account.
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_WHATSAPP_NUMBER = os.environ.get("TWILIO_WHATSAPP_NUMBER") or "+14155238886"
-TWILIO_SANDBOX_JOIN_CODE = os.environ.get("TWILIO_SANDBOX_JOIN_CODE", "")
+# WhatsApp via the Meta Cloud API (Graph). DRY_RUN defaults on: a real send is an
+# explicit decision, never a default. The test number can reach 5 verified recipients.
+WA_GRAPH_VERSION = os.environ.get("WA_GRAPH_VERSION", "v23.0")
+WA_PHONE_NUMBER_ID = os.environ.get("WA_PHONE_NUMBER_ID", "")
+WA_BUSINESS_ACCOUNT_ID = os.environ.get("WA_BUSINESS_ACCOUNT_ID", "")
+WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "")
+WA_APP_SECRET = os.environ.get("WA_APP_SECRET", "")  # signs X-Hub-Signature-256 on webhooks
+WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "")  # our string, echoed in the GET handshake
+WA_TEST_NUMBER = os.environ.get("WA_TEST_NUMBER", "")  # E.164 of the sender, for the QR
 MESSAGING_DRY_RUN = os.environ.get("MESSAGING_DRY_RUN", "true").lower() != "false"
-MESSAGING_BUDGET = int(os.environ.get("MESSAGING_BUDGET", "100"))
+MESSAGING_BUDGET = int(os.environ.get("MESSAGING_BUDGET", "500"))
 
 # Extraction call. The prompt lives in a text file so it can be tuned without a
 # code change; the token cap is deliberately low because this runs every 10-15s.

@@ -6,7 +6,7 @@ Three intents (spec §8):
   anything else     - the history chat (step 13). Stubbed: logged, no reply.
 
 Replies go back through messaging.send_whatsapp, which is dry-run by default.
-A reply to an inbound message is inside Twilio's 24 h window, so free-form
+A reply to an inbound message is inside WhatsApp's 24 h window, so free-form
 text is allowed here; reminders fired later are not and need a template.
 """
 import logging
@@ -84,10 +84,10 @@ def handle_chat(store: Store, phone: str, body: str) -> None:
 
 
 def process_inbound(message: dict, store: Store | None = None, send=None) -> dict:
-    """`message` is the parsed Twilio form: From, Body, ProfileName, ButtonPayload, MessageSid."""
+    """`message` is provider-neutral: From (E.164), Body, ProfileName, ButtonPayload, MessageSid."""
     store = store or Store()
     send = send or messaging.send_whatsapp
-    phone = messaging.bare_number(message.get("From", ""))
+    phone = messaging.e164(message.get("From", ""))
     body = message.get("Body", "")
     intent, doctor_id = classify(body, message.get("ButtonPayload"))
 

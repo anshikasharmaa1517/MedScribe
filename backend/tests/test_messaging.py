@@ -1,5 +1,6 @@
-import base64
-import itertools
+import hashlib
+import hmac
+import json
 
 import pytest
 
@@ -8,110 +9,140 @@ from core.messaging import (
     MessagingAPIError,
     MessagingBudgetExceeded,
     MessagingError,
-    bare_number,
     compute_signature,
-    send_whatsapp,
+    e164,
+    send_document,
+    send_template,
+    send_text,
     valid_signature,
-    whatsapp_address,
+    wa_id,
 )
 
-# The worked example from Twilio's security docs; expected value computed with the
-# official twilio SDK's RequestValidator so this pins parity with their algorithm.
-DOC_TOKEN = "12345"
-DOC_URL = "https://mycompany.com/myapp.php?foo=1&bar=2"
-DOC_PARAMS = {
-    "CallSid": "CA1234567890ABCDE",
-    "Caller": "+12349013030",
-    "Digits": "1234",
-    "From": "+12349013030",
-    "To": "+18005551212",
-}
-DOC_SIGNATURE = "0/KCTR6DLpKmkAf8muzZqo1nDgQ="
+SECRET = "app-secret-123"
+BODY = b'{"object":"whatsapp_business_account","entry":[]}'
 
 
-def test_signature_matches_twilio_sdk():
-    assert compute_signature(DOC_TOKEN, DOC_URL, DOC_PARAMS) == DOC_SIGNATURE
-    assert valid_signature(DOC_SIGNATURE, DOC_URL, DOC_PARAMS, auth_token=DOC_TOKEN)
+def test_signature_is_sha256_hmac_of_raw_body():
+    expected = "sha256=" + hmac.new(SECRET.encode(), BODY, hashlib.sha256).hexdigest()
+    assert compute_signature(SECRET, BODY) == expected
+    assert valid_signature(expected, BODY, app_secret=SECRET)
 
 
 def test_signature_rejects_tampering_and_missing_inputs():
-    assert not valid_signature(DOC_SIGNATURE, DOC_URL, {**DOC_PARAMS, "Digits": "9"}, DOC_TOKEN)
-    assert not valid_signature(DOC_SIGNATURE, DOC_URL + "x", DOC_PARAMS, DOC_TOKEN)
-    assert not valid_signature(None, DOC_URL, DOC_PARAMS, DOC_TOKEN)
-    assert not valid_signature(DOC_SIGNATURE, DOC_URL, DOC_PARAMS, auth_token="")
+    good = compute_signature(SECRET, BODY)
+    assert not valid_signature(good, BODY + b" ", SECRET)
+    assert not valid_signature(good, BODY, "other-secret")
+    assert not valid_signature(None, BODY, SECRET)
+    assert not valid_signature(good, BODY, app_secret="")
 
 
-def test_address_helpers():
-    assert whatsapp_address("+919800000001") == "whatsapp:+919800000001"
-    assert whatsapp_address("whatsapp:+919800000001") == "whatsapp:+919800000001"
-    assert bare_number("whatsapp:+919800000001") == "+919800000001"
-    assert bare_number("+919800000001") == "+919800000001"
+def test_number_helpers():
+    assert wa_id("+919800000001") == "919800000001"
+    assert wa_id("919800000001") == "919800000001"
+    assert wa_id("+91 98000 00001") == "919800000001"
+    assert e164("919800000001") == "+919800000001"
+    assert e164("+919800000001") == "+919800000001"
+    assert e164("") == ""
 
 
 def test_dry_run_is_the_default_and_never_posts(monkeypatch):
     calls = []
     monkeypatch.setattr(messaging, "MESSAGING_DRY_RUN", True)
-    out = send_whatsapp("+919800000001", "hi", post=lambda *a: calls.append(a))
-    assert out["dry_run"] is True
-    assert out["to"] == "whatsapp:+919800000001"
+    out = send_text("+919800000001", "hi", post=lambda *a: calls.append(a))
+    assert out == {"dry_run": True, "to": "+919800000001", "type": "text", "summary": "hi"}
     assert calls == []
 
 
-def test_real_send_posts_form_with_basic_auth_and_counts():
+def make_post(captured, message_id="wamid.X"):
+    def post(url, payload, token):
+        captured.update(url=url, payload=payload, token=token)
+        return {"messaging_product": "whatsapp", "messages": [{"id": message_id}]}
+    return post
+
+
+def test_text_send_posts_graph_payload_with_bearer_and_counts():
     captured = {}
-
-    def post(url, form, sid, token):
-        captured.update(url=url, form=form, sid=sid, token=token)
-        return {"sid": "SM123", "status": "queued"}
-
-    counter = itertools.count(1)
-    out = send_whatsapp(
-        "+919800000001", "hello", media_url="https://x/y.pdf", dry_run=False,
-        meter=lambda: next(counter), account_sid="AC1", auth_token="tok",
-        from_number="+14155238886", post=post,
-    )
-    assert captured["url"] == "https://api.twilio.com/2010-04-01/Accounts/AC1/Messages.json"
-    assert captured["form"] == {
-        "From": "whatsapp:+14155238886", "To": "whatsapp:+919800000001",
-        "Body": "hello", "MediaUrl": "https://x/y.pdf",
+    out = send_text("+919800000001", "hello", dry_run=False, meter=lambda: 1,
+                    phone_number_id="123456", access_token="tok", post=make_post(captured))
+    assert captured["url"] == "https://graph.facebook.com/v23.0/123456/messages"
+    assert captured["token"] == "tok"
+    assert captured["payload"] == {
+        "messaging_product": "whatsapp", "recipient_type": "individual", "to": "919800000001",
+        "type": "text", "text": {"preview_url": False, "body": "hello"},
     }
-    assert (captured["sid"], captured["token"]) == ("AC1", "tok")
-    assert out == {
-        "dry_run": False, "to": "whatsapp:+919800000001", "body": "hello",
-        "media_url": "https://x/y.pdf", "content_sid": None, "content_variables": None,
-        "sid": "SM123", "status": "queued", "sent_count": 1,
+    assert out == {"dry_run": False, "to": "+919800000001", "type": "text", "summary": "hello",
+                   "message_id": "wamid.X", "sent_count": 1}
+
+
+def test_template_send_fills_body_params_in_order():
+    captured = {}
+    send_template("+919800000001", "medicine_reminder", "en", ["Asha", "Dolo 650", "9 pm"],
+                  dry_run=False, meter=lambda: 1, phone_number_id="1", access_token="t",
+                  post=make_post(captured))
+    assert captured["payload"]["type"] == "template"
+    assert captured["payload"]["template"] == {
+        "name": "medicine_reminder", "language": {"code": "en"},
+        "components": [{"type": "body", "parameters": [
+            {"type": "text", "text": "Asha"}, {"type": "text", "text": "Dolo 650"},
+            {"type": "text", "text": "9 pm"},
+        ]}],
+    }
+
+
+def test_template_without_params_has_no_components():
+    captured = {}
+    send_template("+91", "hello_world", "en_US", dry_run=False, meter=lambda: 1,
+                  phone_number_id="1", access_token="t", post=make_post(captured))
+    assert captured["payload"]["template"] == {"name": "hello_world", "language": {"code": "en_US"}}
+
+
+def test_document_send_carries_link_filename_caption():
+    captured = {}
+    send_document("+91", "https://s3/rx.pdf?sig=1", "rx.pdf", "Your prescription",
+                  dry_run=False, meter=lambda: 1, phone_number_id="1", access_token="t",
+                  post=make_post(captured))
+    assert captured["payload"]["type"] == "document"
+    assert captured["payload"]["document"] == {
+        "link": "https://s3/rx.pdf?sig=1", "filename": "rx.pdf", "caption": "Your prescription",
     }
 
 
 def test_budget_ceiling_refuses_before_posting(monkeypatch):
     monkeypatch.setattr(messaging, "MESSAGING_BUDGET", 2)
     posted = []
-    kw = dict(dry_run=False, account_sid="AC1", auth_token="tok", from_number="+1",
-              post=lambda *a: posted.append(a) or {"sid": "x", "status": "queued"})
-    send_whatsapp("+91", "1", meter=lambda: 1, **kw)
-    send_whatsapp("+91", "2", meter=lambda: 2, **kw)
+    kw = dict(dry_run=False, phone_number_id="1", access_token="t",
+              post=lambda *a: posted.append(a) or {"messages": [{"id": "x"}]})
+    send_text("+91", "1", meter=lambda: 1, **kw)
+    send_text("+91", "2", meter=lambda: 2, **kw)
     with pytest.raises(MessagingBudgetExceeded):
-        send_whatsapp("+91", "3", meter=lambda: 3, **kw)
+        send_text("+91", "3", meter=lambda: 3, **kw)
     assert len(posted) == 2
 
 
 def test_real_send_without_credentials_fails_fast(monkeypatch):
-    monkeypatch.setattr(messaging, "TWILIO_ACCOUNT_SID", "")
-    monkeypatch.setattr(messaging, "TWILIO_AUTH_TOKEN", "")
+    monkeypatch.setattr(messaging, "WA_PHONE_NUMBER_ID", "")
+    monkeypatch.setattr(messaging, "WA_ACCESS_TOKEN", "")
     with pytest.raises(MessagingError):
-        send_whatsapp("+91", "x", dry_run=False, meter=lambda: 1)
+        send_text("+91", "x", dry_run=False, meter=lambda: 1)
+
+
+def test_empty_body_and_bad_recipient_are_rejected():
+    with pytest.raises(MessagingError):
+        send_text("+91", "   ", dry_run=True)
+    with pytest.raises(MessagingError):
+        send_text("not-a-number", "hi", dry_run=True)
 
 
 def test_http_failure_surfaces_as_api_error():
     def post(*_):
-        raise MessagingAPIError("HTTP 401: bad creds")
+        raise MessagingAPIError("HTTP 401: bad token")
 
     with pytest.raises(MessagingAPIError):
-        send_whatsapp("+91", "x", dry_run=False, meter=lambda: 1, account_sid="a",
-                      auth_token="b", from_number="+1", post=post)
+        send_text("+91", "x", dry_run=False, meter=lambda: 1, phone_number_id="1",
+                  access_token="t", post=post)
 
 
-def test_basic_auth_header_is_well_formed(monkeypatch):
+def test_http_post_sends_json_with_bearer(monkeypatch):
     seen = {}
 
     class FakeResponse:
@@ -122,37 +153,15 @@ def test_basic_auth_header_is_well_formed(monkeypatch):
             return False
 
         def read(self):
-            return b'{"sid": "SM1", "status": "queued"}'
+            return b'{"messages": [{"id": "wamid.1"}]}'
 
     def fake_urlopen(req, timeout, context=None):
         seen["auth"] = req.get_header("Authorization")
-        seen["data"] = req.data
+        seen["ctype"] = req.get_header("Content-type")
+        seen["data"] = json.loads(req.data)
         return FakeResponse()
 
     monkeypatch.setattr(messaging.urllib.request, "urlopen", fake_urlopen)
-    messaging._http_post_form("https://api.twilio.com/x", {"Body": "a b"}, "AC1", "tok")
-    assert seen["auth"] == "Basic " + base64.b64encode(b"AC1:tok").decode()
-    assert seen["data"] == b"Body=a+b"
-
-
-def test_template_send_uses_content_sid_instead_of_body():
-    captured = {}
-
-    def post(url, form, sid, token):
-        captured.update(form)
-        return {"sid": "SM9", "status": "queued"}
-
-    out = send_whatsapp(
-        "+919800000001", content_sid="HX123", content_variables={"1": "Asha", "2": "9 pm"},
-        dry_run=False, meter=lambda: 1, account_sid="AC1", auth_token="tok",
-        from_number="+1", post=post,
-    )
-    assert "Body" not in captured
-    assert captured["ContentSid"] == "HX123"
-    assert captured["ContentVariables"] == '{"1": "Asha", "2": "9 pm"}'
-    assert out["content_sid"] == "HX123" and out["sid"] == "SM9"
-
-
-def test_send_requires_body_or_template():
-    with pytest.raises(MessagingError):
-        send_whatsapp("+91", dry_run=True)
+    out = messaging._http_post_json("https://graph.facebook.com/x", {"a": 1}, "tok")
+    assert seen == {"auth": "Bearer tok", "ctype": "application/json", "data": {"a": 1}}
+    assert out["messages"][0]["id"] == "wamid.1"

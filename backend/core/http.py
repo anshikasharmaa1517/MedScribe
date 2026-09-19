@@ -1,4 +1,4 @@
-"""Shared TLS context for the urllib-based clients (Twilio, Bedrock Mantle).
+"""Shared TLS context for the urllib-based clients (WhatsApp Cloud API, Bedrock Mantle).
 
 python.org's macOS build ships without a CA bundle, so urllib fails every
 HTTPS handshake with CERTIFICATE_VERIFY_FAILED. certifi fixes that where it is

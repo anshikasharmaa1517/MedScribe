@@ -12,7 +12,7 @@ parallel = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Env=dev TwilioWhatsAppNumber=+17372508034"
+parameter_overrides = "Env=dev"
 disable_rollback = false
 
 [default.validate.parameters]

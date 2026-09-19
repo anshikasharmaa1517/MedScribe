@@ -105,29 +105,36 @@ have no brand, 2 have no condition mapping.
 - `infra/template.yaml` + `samconfig.toml` — table + GSI1, reference tables, S3, two
   Cognito pools, HTTP API with Cognito JWT authoriser, `/health`, consultation API,
   Twilio webhook. **Deployed** as stack `medscribe-dev`; tables seeded (Tier 0 + demo).
-- `core/messaging.py` (`send_whatsapp`, `valid_signature`), `core/inbound.py`
-  (START / TAKEN / chat-stub routing), `handlers/twilio_webhook.py`,
-  `scripts/generate_qr.py`, `scripts/send_test_message.py`.
-- 145 tests, all offline. `.claude/skills/medscribe-review` reviews diffs against the
+- `core/messaging.py`, `core/inbound.py`, `handlers/whatsapp_webhook.py`,
+  `scripts/generate_qr.py`, `scripts/send_test_message.py` — see the WhatsApp section.
+- 156 tests, all offline. `.claude/skills/medscribe-review` reviews diffs against the
   seven rules.
 
-## Twilio (verified end to end 2026-09-19)
+## WhatsApp — Meta Cloud API (Twilio dropped 2026-09-19)
 
-- The account is on Twilio's **new WhatsApp trial flow**, not the classic sandbox:
-  sender `+17372508034`, join phrase `join twilio-trial`. Inbound webhook is set in the
-  console (Send & receive → Inbound); Content, Senders and Alerts APIs are trial-locked.
-- **Trial senders accept only Twilio's canned sample templates** (`ContentSid`), error
-  21654 otherwise — no free-form text even inside the 24 h window, no custom templates,
-  no media. Inbound is unrestricted. The one real message sent was the "Marketing
-  Promotions" sample, `HXd3d932e8cb4598189831c97250c43d17`, delivered and read.
-- Consequence: prescription text, PDF links and reminders **cannot go out on this
-  account as-is**. Options: upgrade the Twilio account (~$20 credit unlocks free-form in
-  the 24 h window + custom templates), or find the classic sandbox under Messaging →
-  Settings if it still exists. Decide before step 10/12.
-- Outbound is dry-run by default everywhere (`MESSAGING_DRY_RUN`); real sends are
-  metered in DynamoDB `METER#whatsapp_sent` and refused past `MESSAGING_BUDGET` (100).
-- Test phone `+918899511700` is joined and linked to `doc-demo-meera` as patient
-  `23989008536c`. Auth token was pasted in a chat session — rotate it after the event.
+- Twilio's new trial flow only sends its own canned templates (error 21654), so it was
+  replaced with the Meta Cloud API test number. Twilio code is gone; it's in git history
+  (`d2bde23`, `17c9124`) if ever needed.
+- `core/messaging.py`: `send_text` / `send_template` / `send_document` via Graph
+  `POST /v23.0/{WA_PHONE_NUMBER_ID}/messages`; `valid_signature` checks
+  `X-Hub-Signature-256` (HMAC-SHA256 of the raw body with `WA_APP_SECRET`).
+  `send_whatsapp` is the plain-text alias the inbound router uses.
+- `handlers/whatsapp_webhook.py`: GET = Meta verification handshake (`WA_VERIFY_TOKEN`);
+  POST = signature check → 200 → async self-invoke → `core/inbound.py` routing
+  (START / TAKEN / chat stub). Message ids are claimed in DynamoDB (`WAMSG#<id>`) so
+  Meta's redeliveries are no-ops. Voice notes/images/docs arrive as `[audio]` etc. and go
+  to the chat stub — never dropped.
+- Secrets in SSM under `/medscribe/dev/`: `WA_ACCESS_TOKEN`, `WA_APP_SECRET`,
+  `WA_VERIFY_TOKEN`, `WA_PHONE_NUMBER_ID`. Locally the same names in `.env`, plus
+  `WA_TEST_NUMBER` for the QR (`scripts/generate_qr.py` → `wa.me/<number>?text=START <doctorId>`).
+- Constraints: test number reaches **5 verified recipients**; free-form text/documents
+  only inside 24 h of the patient's last inbound; templates otherwise. The
+  `medicine_reminder` utility template ({{1}} name, {{2}} medicine, {{3}} timing) is
+  submitted from WhatsApp Manager and is what step 12 sends via `send_template`.
+- Outbound is dry-run by default (`MESSAGING_DRY_RUN`); real sends are metered in
+  DynamoDB `METER#whatsapp_sent`, refused past `MESSAGING_BUDGET` (500).
+- Patient `23989008536c` (+918899511700) was linked during the Twilio test and is still
+  in the table.
 
 ## Build order
 
@@ -139,8 +146,8 @@ have no brand, 2 have no condition mapping.
 6. Patient dashboard + history chat
 7. Alexa (only if everything above is done)
 
-Do first, regardless: resolve the Twilio outbound constraint above (upgrade or classic
-sandbox), then submit the reminder template. (Bedrock: resolved via Mantle.)
+Do first, regardless: get a permanent Meta system-user token (the API Setup one dies in
+24 h) and submit the `medicine_reminder` template. (Bedrock: resolved via Mantle.)
 
 ## AWS account
 

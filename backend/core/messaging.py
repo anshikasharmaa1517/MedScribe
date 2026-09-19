@@ -1,33 +1,36 @@
-"""Outbound WhatsApp via the Twilio REST API, plus inbound signature validation.
+"""Outbound WhatsApp via the Meta Cloud API, plus inbound webhook signature checks.
 
-Dry run is the default. The sandbox allows 100 messages for the whole hackathon,
-so every real send is (a) an explicit `dry_run=False`, (b) counted against
-MESSAGING_BUDGET in DynamoDB, and (c) logged with the running total. Nothing
-in this module decides *whether* a message should go out - callers gate on
-doctor approval (rule 7); this module only delivers.
+Dry run is the default: every real send is an explicit `dry_run=False`, is
+counted against MESSAGING_BUDGET in DynamoDB, and is logged with the running
+total. Nothing in this module decides *whether* a message should go out -
+callers gate on doctor approval (rule 7); this module only delivers.
+
+Free-form text and documents are accepted by WhatsApp only inside the 24 h
+window after the patient's last inbound message. Outside it (reminders), send
+an approved template.
 """
-import base64
 import hashlib
 import hmac
 import json
 import logging
 import urllib.error
-import urllib.parse
 import urllib.request
 
 from core.http import ssl_context
 from core.settings import (
     MESSAGING_BUDGET,
     MESSAGING_DRY_RUN,
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_WHATSAPP_NUMBER,
+    WA_ACCESS_TOKEN,
+    WA_APP_SECRET,
+    WA_GRAPH_VERSION,
+    WA_PHONE_NUMBER_ID,
 )
 
 log = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 15
 BUDGET_COUNTER = "whatsapp_sent"
+GRAPH_BASE = "https://graph.facebook.com"
 
 
 class MessagingError(Exception):
@@ -35,104 +38,79 @@ class MessagingError(Exception):
 
 
 class MessagingBudgetExceeded(MessagingError):
-    """Refused: the sandbox message budget is spent."""
+    """Refused: the message budget is spent."""
 
 
 class MessagingAPIError(MessagingError):
-    """Twilio rejected the request or was unreachable."""
+    """Meta rejected the request or was unreachable."""
 
 
-def whatsapp_address(number: str) -> str:
-    number = number.strip()
-    return number if number.startswith("whatsapp:") else f"whatsapp:{number}"
+def wa_id(phone: str) -> str:
+    """E.164 '+919876543210' -> WhatsApp id '919876543210'."""
+    return "".join(ch for ch in phone if ch.isdigit())
 
 
-def bare_number(address: str) -> str:
-    """'whatsapp:+9198...' -> '+9198...'."""
-    return address.split(":", 1)[1] if address.startswith("whatsapp:") else address
+def e164(wa: str) -> str:
+    """WhatsApp id '919876543210' -> '+919876543210'."""
+    digits = wa_id(wa)
+    return f"+{digits}" if digits else ""
 
 
-# -- inbound: X-Twilio-Signature ---------------------------------------------
+# -- inbound: X-Hub-Signature-256 ---------------------------------------------
 
-def compute_signature(auth_token: str, url: str, params: dict) -> str:
-    """Twilio's scheme: HMAC-SHA1 over the full URL followed by sorted key+value pairs."""
-    payload = url + "".join(k + params[k] for k in sorted(params))
-    digest = hmac.new(auth_token.encode(), payload.encode(), hashlib.sha1).digest()
-    return base64.b64encode(digest).decode()
+def compute_signature(app_secret: str, raw_body: bytes) -> str:
+    return "sha256=" + hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
 
 
-def valid_signature(signature: str | None, url: str, params: dict, auth_token=None) -> bool:
-    auth_token = auth_token or TWILIO_AUTH_TOKEN
-    if not signature or not auth_token:
+def valid_signature(header: str | None, raw_body: bytes, app_secret: str | None = None) -> bool:
+    app_secret = app_secret or WA_APP_SECRET
+    if not header or not app_secret:
         return False
-    return hmac.compare_digest(compute_signature(auth_token, url, params), signature)
+    return hmac.compare_digest(compute_signature(app_secret, raw_body), header)
 
 
 # -- outbound -----------------------------------------------------------------
 
-def _http_post_form(url: str, form: dict, account_sid: str, auth_token: str) -> dict:
-    creds = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+def _http_post_json(url: str, payload: dict, access_token: str) -> dict:
     req = urllib.request.Request(
         url,
-        data=urllib.parse.urlencode(form).encode(),
-        headers={
-            "Authorization": f"Basic {creds}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS, context=ssl_context()) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        raise MessagingAPIError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}") from e
+        raise MessagingAPIError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from e
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise MessagingAPIError(str(e)) from e
 
 
-def send_whatsapp(
+def _deliver(
     to: str,
-    body: str | None = None,
-    media_url: str | None = None,
+    payload: dict,
+    summary: str,
     *,
-    content_sid: str | None = None,
-    content_variables: dict | None = None,
-    dry_run: bool | None = None,
-    meter=None,
-    account_sid: str | None = None,
-    auth_token: str | None = None,
-    from_number: str | None = None,
-    post=_http_post_form,
+    dry_run: bool | None,
+    meter,
+    phone_number_id: str | None,
+    access_token: str | None,
+    post,
 ) -> dict:
-    """Send one WhatsApp message. Returns a small dict describing what happened.
-
-    Free-form `body` is allowed only inside WhatsApp's 24 h window after the
-    patient's last inbound message. Outside it (reminders), and always on a
-    Twilio trial sender, pass an approved template's `content_sid` plus its
-    `content_variables` instead.
-
-    `meter` is a callable returning the running count of real sends after
-    incrementing it; defaults to the DynamoDB counter. It runs *before* the send
-    so a failed send still burns a slot - the budget is a ceiling, not a ledger.
-    """
-    if not body and not content_sid:
-        raise MessagingError("either body or content_sid is required")
     dry_run = MESSAGING_DRY_RUN if dry_run is None else dry_run
-    to_addr = whatsapp_address(to)
-    described = {"to": to_addr, "body": body, "media_url": media_url,
-                 "content_sid": content_sid, "content_variables": content_variables}
+    to_id = wa_id(to)
+    if not to_id:
+        raise MessagingError(f"invalid recipient {to!r}")
+    body = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": to_id, **payload}
+    described = {"to": e164(to_id), "type": payload["type"], "summary": summary}
     if dry_run:
-        log.info("DRY RUN whatsapp -> %s: %s%s%s", to_addr, body or "",
-                 f" [template {content_sid} {content_variables or {}}]" if content_sid else "",
-                 f" [media {media_url}]" if media_url else "")
+        log.info("DRY RUN whatsapp -> %s: %s", described["to"], summary)
         return {"dry_run": True, **described}
 
-    account_sid = account_sid or TWILIO_ACCOUNT_SID
-    auth_token = auth_token or TWILIO_AUTH_TOKEN
-    from_number = from_number or TWILIO_WHATSAPP_NUMBER
-    if not (account_sid and auth_token and from_number):
-        raise MessagingError(
-            "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_NUMBER are required"
-        )
+    phone_number_id = phone_number_id or WA_PHONE_NUMBER_ID
+    access_token = access_token or WA_ACCESS_TOKEN
+    if not (phone_number_id and access_token):
+        raise MessagingError("WA_PHONE_NUMBER_ID and WA_ACCESS_TOKEN are required")
 
     if meter is None:
         from core.store import Store
@@ -142,20 +120,51 @@ def send_whatsapp(
     if count > MESSAGING_BUDGET:
         raise MessagingBudgetExceeded(f"send #{count} exceeds budget of {MESSAGING_BUDGET}")
 
-    form = {"From": whatsapp_address(from_number), "To": to_addr}
-    if content_sid:
-        form["ContentSid"] = content_sid
-        if content_variables:
-            form["ContentVariables"] = json.dumps(content_variables)
-    else:
-        form["Body"] = body
-    if media_url:
-        form["MediaUrl"] = media_url
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
-    result = post(url, form, account_sid, auth_token)
-    log.info("SENT whatsapp -> %s sid=%s status=%s (%d/%d used)",
-             to_addr, result.get("sid"), result.get("status"), count, MESSAGING_BUDGET)
-    return {
-        "dry_run": False, **described,
-        "sid": result.get("sid"), "status": result.get("status"), "sent_count": count,
-    }
+    url = f"{GRAPH_BASE}/{WA_GRAPH_VERSION}/{phone_number_id}/messages"
+    result = post(url, body, access_token)
+    message_id = ((result.get("messages") or [{}])[0]).get("id")
+    log.info("SENT whatsapp -> %s id=%s (%d/%d used): %s",
+             described["to"], message_id, count, MESSAGING_BUDGET, summary)
+    return {"dry_run": False, **described, "message_id": message_id, "sent_count": count}
+
+
+def send_text(to: str, body: str, *, dry_run=None, meter=None, phone_number_id=None,
+              access_token=None, post=_http_post_json) -> dict:
+    if not body or not body.strip():
+        raise MessagingError("body is required")
+    payload = {"type": "text", "text": {"preview_url": False, "body": body}}
+    return _deliver(to, payload, body, dry_run=dry_run, meter=meter,
+                    phone_number_id=phone_number_id, access_token=access_token, post=post)
+
+
+def send_template(to: str, name: str, language: str = "en", body_params: list[str] | None = None,
+                  components: list[dict] | None = None, *, dry_run=None, meter=None,
+                  phone_number_id=None, access_token=None, post=_http_post_json) -> dict:
+    """Send an approved template. `body_params` fills {{1}}..{{n}} in order; pass
+    `components` instead for headers/buttons."""
+    template = {"name": name, "language": {"code": language}}
+    if components is None and body_params:
+        components = [{"type": "body",
+                       "parameters": [{"type": "text", "text": str(p)} for p in body_params]}]
+    if components:
+        template["components"] = components
+    payload = {"type": "template", "template": template}
+    summary = f"template {name}/{language} {body_params or ''}".strip()
+    return _deliver(to, payload, summary, dry_run=dry_run, meter=meter,
+                    phone_number_id=phone_number_id, access_token=access_token, post=post)
+
+
+def send_document(to: str, link: str, filename: str, caption: str | None = None, *,
+                  dry_run=None, meter=None, phone_number_id=None, access_token=None,
+                  post=_http_post_json) -> dict:
+    document = {"link": link, "filename": filename}
+    if caption:
+        document["caption"] = caption
+    payload = {"type": "document", "document": document}
+    return _deliver(to, payload, f"document {filename} {link}", dry_run=dry_run, meter=meter,
+                    phone_number_id=phone_number_id, access_token=access_token, post=post)
+
+
+def send_whatsapp(to: str, body: str, **kw) -> dict:
+    """Plain-text convenience used by the inbound router."""
+    return send_text(to, body, **kw)

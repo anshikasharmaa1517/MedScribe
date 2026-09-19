@@ -332,6 +332,18 @@ class Store:
         item = self._get(f"METER#{name}", "COUNT")
         return int(item.get("count", 0)) if item else 0
 
+    def claim_inbound(self, message_id: str) -> bool:
+        """True the first time a webhook message id is seen; False on redelivery."""
+        try:
+            self.table.put_item(
+                Item={"PK": f"WAMSG#{message_id}", "SK": "SEEN", "entity": "INBOUND_SEEN",
+                      "seenAt": now_iso()},
+                ConditionExpression="attribute_not_exists(PK)",
+            )
+            return True
+        except self.db.meta.client.exceptions.ConditionalCheckFailedException:
+            return False
+
     # -- doctor shortlist (Tier 1) ----------------------------------------
 
     def add_to_shortlist(self, doctor_id: str, brand_id: str, **attrs) -> dict:

@@ -1,14 +1,15 @@
-"""Send exactly one WhatsApp message, to prove the Twilio path end to end.
+"""Send exactly one WhatsApp message, to prove the Meta Cloud API path end to end.
 
 Dry run unless --really is passed. Credentials come from the environment or
-../.env (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER). The
-recipient must already have joined the sandbox from that phone.
+../.env (WA_PHONE_NUMBER_ID, WA_ACCESS_TOKEN). The recipient must be in the
+test number's allowed list (Meta console -> API Setup -> "To").
 
 Run from backend/:
-    python -m scripts.send_test_message --to +91XXXXXXXXXX                # dry run, prints
-    python -m scripts.send_test_message --to +91XXXXXXXXXX --really       # one real message
-    python -m scripts.send_test_message --to +91XXXXXXXXXX --really --content-sid HX...
-        (a Twilio trial sender only accepts templates, so --content-sid is required there)
+    python -m scripts.send_test_message --to +91XXXXXXXXXX                       # dry run
+    python -m scripts.send_test_message --to +91XXXXXXXXXX --really          # hello_world template
+    python -m scripts.send_test_message --to +91XXXXXXXXXX --really --text "hi"   # 24 h window
+    python -m scripts.send_test_message --to +91XXXXXXXXXX --really \
+        --template medicine_reminder --lang en --param Asha --param "Dolo 650" --param "9 pm"
 """
 import argparse
 import logging
@@ -31,34 +32,32 @@ def _load_dotenv():
 
 _load_dotenv()
 
-from core.messaging import MessagingError, send_whatsapp  # noqa: E402
-
-DEFAULT_BODY = (
-    "MedScribe test: this is the one end-to-end WhatsApp message. "
-    "If you can read this, outbound delivery works."
-)
+from core.messaging import MessagingError, send_document, send_template, send_text  # noqa: E402
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--to", required=True, help="E.164, e.g. +919876543210")
-    parser.add_argument("--body", default=DEFAULT_BODY)
-    parser.add_argument("--content-sid",
-                        help="HX... template id; required on a Twilio trial sender")
-    parser.add_argument("--var", action="append", default=[], metavar="N=VALUE",
-                        help="template variable, e.g. --var 1=Asha (repeatable)")
-    parser.add_argument("--really", action="store_true", help="actually send (counts against 100)")
+    parser.add_argument("--text", help="free-form text (only inside the 24 h window)")
+    parser.add_argument("--template", default="hello_world", help="template name")
+    parser.add_argument("--lang", default="en_US", help="template language code")
+    parser.add_argument("--param", action="append", default=[], help="template body {{n}} value")
+    parser.add_argument("--document", help="public/presigned URL of a PDF to send")
+    parser.add_argument("--filename", default="prescription.pdf")
+    parser.add_argument("--really", action="store_true", help="actually send (metered)")
     parser.add_argument("--no-meter", action="store_true",
                         help="skip the DynamoDB budget counter (no AWS creds needed)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    meter = (lambda: 0) if args.no_meter else None
+    kw = {"dry_run": not args.really, "meter": (lambda: 0) if args.no_meter else None}
     try:
-        variables = dict(v.split("=", 1) for v in args.var) or None
-        out = send_whatsapp(args.to, None if args.content_sid else args.body,
-                            content_sid=args.content_sid, content_variables=variables,
-                            dry_run=not args.really, meter=meter)
+        if args.document:
+            out = send_document(args.to, args.document, args.filename, **kw)
+        elif args.text:
+            out = send_text(args.to, args.text, **kw)
+        else:
+            out = send_template(args.to, args.template, args.lang, args.param or None, **kw)
     except MessagingError as e:
         print(f"FAILED: {e}", file=sys.stderr)
         return 1

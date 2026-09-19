@@ -15,11 +15,7 @@ Parameters:
     Type: String
     Default: "true"
     AllowedValues: ["true", "false"]
-    Description: Outbound WhatsApp logs instead of sending unless "false". 100 sandbox messages total.
-  TwilioWhatsAppNumber:
-    Type: String
-    Default: "+14155238886"
-    Description: The Twilio WhatsApp sandbox number (shared across accounts).
+    Description: Outbound WhatsApp logs instead of sending unless "false".
 
 Globals:
   Function:
@@ -35,8 +31,8 @@ Globals:
         SALTS_TABLE: !Ref SaltsTable
         CONDITIONS_TABLE: !Ref ConditionsTable
         MEDSCRIBE_BUCKET: !Ref MedscribeBucket
-        # Secrets (Sarvam, Twilio, Bedrock API key) are read at runtime from
-        # SSM Parameter Store under this prefix - never set here.
+        # Secrets (Sarvam, WhatsApp token/app secret, Bedrock API key) are read at
+        # runtime from SSM Parameter Store under this prefix - never set here.
         SSM_PREFIX: !Sub /medscribe/${Env}
 
 Resources:
@@ -244,20 +240,20 @@ Resources:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/approve", Method: POST }
 
-  # Inbound WhatsApp. Unauthenticated (Twilio calls it), so the handler verifies
-  # X-Twilio-Signature with the auth token from SSM before touching the body, then
-  # re-invokes itself asynchronously so Twilio gets its 200 fast.
-  TwilioWebhookFunction:
+  # Inbound WhatsApp (Meta Cloud API). Unauthenticated, so the handler verifies
+  # X-Hub-Signature-256 with the app secret from SSM before parsing the body, then
+  # re-invokes itself asynchronously so Meta gets its 200 fast. GET is the one-time
+  # verification handshake.
+  WhatsAppWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub medscribe-twilio-webhook-${Env}
+      FunctionName: !Sub medscribe-whatsapp-webhook-${Env}
       CodeUri: ../backend
-      Handler: handlers.twilio_webhook.handler
+      Handler: handlers.whatsapp_webhook.handler
       Timeout: 20
       Environment:
         Variables:
           MESSAGING_DRY_RUN: !Ref MessagingDryRun
-          TWILIO_WHATSAPP_NUMBER: !Ref TwilioWhatsAppNumber
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
         - Statement:
@@ -268,13 +264,20 @@ Resources:
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
             - Effect: Allow
               Action: lambda:InvokeFunction
-              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:medscribe-twilio-webhook-${Env}
+              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:medscribe-whatsapp-webhook-${Env}
       Events:
+        Verify:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /webhooks/whatsapp
+            Method: GET
+            Auth: { Authorizer: NONE }
         Inbound:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
-            Path: /webhooks/twilio
+            Path: /webhooks/whatsapp
             Method: POST
             Auth: { Authorizer: NONE }
 
@@ -283,9 +286,9 @@ Outputs:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
   HealthUrl:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/health
-  TwilioWebhookUrl:
-    Description: Paste into Twilio sandbox -> "When a message comes in" (POST).
-    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/webhooks/twilio
+  WhatsAppWebhookUrl:
+    Description: Meta app -> WhatsApp -> Configuration -> Callback URL; subscribe to "messages".
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/webhooks/whatsapp
   TableName:
     Value: !Ref MedscribeTable
   BucketName:

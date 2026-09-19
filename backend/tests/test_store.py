@@ -178,3 +178,9 @@ def test_reminder_taken_and_counter(store):
     assert store.increment_counter("whatsapp_sent") == 1
     assert store.increment_counter("whatsapp_sent") == 2
     assert store.get_counter("whatsapp_sent") == 2
+
+
+def test_claim_inbound_is_first_writer_wins(store):
+    assert store.claim_inbound("wamid.abc") is True
+    assert store.claim_inbound("wamid.abc") is False
+    assert store.claim_inbound("wamid.xyz") is True
