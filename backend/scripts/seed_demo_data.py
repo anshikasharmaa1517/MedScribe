@@ -164,6 +164,20 @@ PATIENTS = [
 ]
 
 
+PROPOSALS = [
+    {"propId": "prop-demo-001", "createdAt": "2026-09-15T09:00:00Z", "source": "web-search",
+     "spoken": "zerodol th", "proposed_brand": "Zerodol TH 4mg",
+     "proposed_salts": ["Aceclofenac", "Thiocolchicoside"],
+     "evidence_url": "https://www.1mg.com/drugs/zerodol-th-tablet", "confidence": 0.71,
+     "note": "Combination not in Tier 0; seen twice in consults this week."},
+    {"propId": "prop-demo-002", "createdAt": "2026-09-16T14:30:00Z", "source": "web-search",
+     "spoken": "sompraz d", "proposed_brand": "Sompraz D 40mg",
+     "proposed_salts": ["Esomeprazole", "Domperidone"],
+     "evidence_url": "https://www.1mg.com/drugs/sompraz-d-40-capsule", "confidence": 0.64,
+     "note": "Patient reported taking this; not in seed brands."},
+]
+
+
 def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -206,6 +220,13 @@ def seed(store: Store, now: datetime | None = None) -> dict:
         summary["patients"].append(patient["patientId"])
     for brand_id, entry in shortlist.items():
         store.add_to_shortlist(DOCTOR_ID, brand_id, **entry)
+
+    # Two agent-proposed (Tier 2) entries for the reviewer screen. Fixed ids and
+    # timestamps so re-seeding does not pile up duplicates. Never auto-promoted.
+    for prop in PROPOSALS:
+        if not store._get("QUEUE", f"PENDING#{prop['createdAt']}#{prop['propId']}"):
+            store.enqueue_proposal(prop)
+    summary["proposals"] = len(PROPOSALS)
     return summary
 
 

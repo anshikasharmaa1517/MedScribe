@@ -33,7 +33,8 @@ def test_course_days_parses_hinglish_and_units():
 
 def test_slots_follow_spec_timing_and_food_shift():
     assert reminders.slots_for({"frequency": "1-0-1"}) == [(9, 0), (21, 0)]
-    assert reminders.slots_for({"frequency": "1-0-1", "food_relation": "after food"}) == [(9, 30), (21, 30)]
+    after = {"frequency": "1-0-1", "food_relation": "after food"}
+    assert reminders.slots_for(after) == [(9, 30), (21, 30)]
     assert reminders.slots_for({"frequency": "OD", "food_relation": "before food"}) == [(8, 30)]
     assert reminders.slots_for({"frequency": "TDS"}) == [(9, 0), (14, 0), (21, 0)]
     assert reminders.slots_for({"frequency": None}) == []
@@ -48,7 +49,8 @@ def test_course_schedules_one_per_medicine_slot_plus_visit():
     assert dolo["cron"] == "cron(30 9 * * ? *)" and dolo["timezone"] == "Asia/Kolkata"
     assert dolo["endAt"].date() == (START + timedelta(days=2)).date()
     assert dolo["input"] == {"type": "dose", "rxId": "r1", "patientId": "pat-demo-001",
-                             "brand_id": "B001", "label": "Dolo 650mg", "slot": "0930", "medIndex": 0}
+                             "brand_id": "B001", "label": "Dolo 650mg", "slot": "0930",
+                             "medIndex": 0}
     visit = scheds[-1]
     assert visit["at"].strftime("%Y-%m-%d %H:%M") == "2026-09-24 09:00"
     assert visit["input"]["type"] == "next_visit"
@@ -147,9 +149,11 @@ def test_taken_marks_latest_sent_reminder(env):
 def test_next_visit_fire_is_idempotent(env):
     fire, st = env
     seed_rx(st, START)
-    event = {"type": "next_visit", "rxId": "r1", "patientId": "pat-demo-001", "next_visit": "5 days"}
+    event = {"type": "next_visit", "rxId": "r1", "patientId": "pat-demo-001",
+             "next_visit": "5 days"}
     out = fire.handler(event, None)
-    assert out["sent"] and "follow-up" in out["result"]["payload"]["template"]["components"][0]["parameters"][1]["text"]
+    params = out["result"]["payload"]["template"]["components"][0]["parameters"]
+    assert out["sent"] and "follow-up" in params[1]["text"]
     assert fire.handler(event, None)["skipped"] == "already sent"
 
 

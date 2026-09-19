@@ -50,11 +50,23 @@ def main(argv=None):
     ap.add_argument("--email", required=True)
     ap.add_argument("--password", required=True)
     ap.add_argument("--doctor-id", default="doc-demo-meera")
+    ap.add_argument("--reviewer", action="store_true",
+                    help="also add to the 'reviewers' group (Tier 2 review screen)")
     ap.add_argument("--region", default=AWS_REGION)
     args = ap.parse_args(argv)
 
     idp = boto3.client("cognito-idp", region_name=args.region)
     ensure_user(idp, args.pool, args.email, args.password, args.doctor_id)
+    if args.reviewer:
+        try:
+            idp.create_group(GroupName="reviewers", UserPoolId=args.pool,
+                             Description="May approve/reject Tier 2 proposals")
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "GroupExistsException":
+                raise
+        idp.admin_add_user_to_group(UserPoolId=args.pool, Username=args.email,
+                                    GroupName="reviewers")
+        print("in group: reviewers")
     print("\nVITE_ID_TOKEN=" + id_token(idp, args.pool, args.client, args.email, args.password))
     return 0
 

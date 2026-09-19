@@ -155,7 +155,11 @@ Resources:
       ClientName: patient-web
       UserPoolId: !Ref PatientUserPool
       GenerateSecret: false
-      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH      # patient web login (phone + password)
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
 
   # ---------------------------------------------------------------- api
   HttpApi:
@@ -173,6 +177,11 @@ Resources:
             JwtConfiguration:
               issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${DoctorUserPool}
               audience: [!Ref DoctorUserPoolClient]
+          PatientJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${PatientUserPool}
+              audience: [!Ref PatientUserPoolClient]
         DefaultAuthorizer: DoctorJwt
 
   HealthFunction:
@@ -228,6 +237,28 @@ Resources:
         Prescription:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/prescription", Method: GET }
+        PatientHistory:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/patients/{id}/history", Method: GET }
+        PatientAsk:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/patients/{id}/ask", Method: POST }
+        ReviewPending:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /review/pending, Method: GET }
+        ReviewDecide:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/review/{createdAt}/{propId}", Method: POST }
+        # Patient-pool routes: the Lambda resolves the patient from the token's phone_number.
+        Me:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /me, Method: GET, Auth: { Authorizer: PatientJwt } }
+        MeHistory:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /me/history, Method: GET, Auth: { Authorizer: PatientJwt } }
+        MeAsk:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /me/ask, Method: POST, Auth: { Authorizer: PatientJwt } }
         Patients:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: /patients, Method: GET }
