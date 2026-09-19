@@ -41,7 +41,7 @@ def _load_secrets_from_ssm() -> None:
 
 _load_secrets_from_ssm()
 
-from core import history_chat  # noqa: E402
+from core import history_chat, ws  # noqa: E402
 from core.draft_edit import PatchError, apply_patch  # noqa: E402
 from core.llm import get_client  # noqa: E402
 from core.pipeline import empty_draft, process  # noqa: E402
@@ -234,7 +234,14 @@ def patch_draft(c: dict, body: dict) -> dict:
         raise HttpError(400, str(e)) from e
     draft["updatedAt"] = now_iso()
     store().update_consultation(c, draft=draft)
+    ws.broadcast(store(), c["consultId"], ws.draft_update(draft))   # other tabs / sockets
     return draft
+
+
+def ws_ticket(c: dict) -> dict:
+    if c.get("status") != "LIVE":
+        raise HttpError(409, "consult is not live")
+    return {"ticket": store().put_ws_ticket(c["consultId"], c["doctorId"]), "expires_in": 60}
 
 
 def approve(c: dict) -> dict:
@@ -438,6 +445,8 @@ def route(event: dict) -> dict:
             return respond(202 if out["status"] == "APPROVING" else 200, out)
         if sub == "prescription" and method == "GET":
             return respond(200, prescription(c))
+        if sub == "ws-ticket" and method == "POST":
+            return respond(200, ws_ticket(c))
     raise HttpError(404, f"no route for {method} {path}")
 
 

@@ -105,6 +105,7 @@ export interface Api {
   patchDraft(id: string, patch: DraftPatch): Promise<Draft>;
   approve(id: string): Promise<{ status: string; rxId: string }>;
   getPrescription(id: string): Promise<Prescription>;
+  wsTicket(id: string): Promise<{ ticket: string; expires_in: number }>;
   listPending(): Promise<Proposal[]>;
   review(createdAt: string, propId: string, decision: "APPROVED" | "REJECTED"): Promise<{ status: string }>;
   searchBrands(q: string): Promise<BrandHit[]>;

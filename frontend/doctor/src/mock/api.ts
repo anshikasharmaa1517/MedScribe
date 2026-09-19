@@ -204,6 +204,8 @@ export const mockApi: Api = {
     return rx;
   },
 
+  async wsTicket() { throw new Error("no websocket in mock mode"); },
+
   async listPending() {
     return pending.filter((p) => p.status === "PENDING");
   },

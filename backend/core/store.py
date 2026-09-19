@@ -417,6 +417,49 @@ class Store:
         except self.table.meta.client.exceptions.ConditionalCheckFailedException as e:
             raise KeyError(f"no pending proposal {prop_id}") from e
 
+    # -- websocket tickets and connections --------------------------------
+    # A ticket is minted over the authorised REST API and exchanged once on
+    # $connect; it is what ties a socket to exactly one consult and doctor.
+
+    def put_ws_ticket(self, consult_id: str, doctor_id: str, ttl_seconds: int = 60) -> str:
+        ticket = uuid.uuid4().hex
+        self._put({
+            "PK": f"WSTICKET#{ticket}", "SK": "META", "entity": "WSTICKET",
+            "consultId": consult_id, "doctorId": doctor_id,
+            "ttl": int(datetime.now(UTC).timestamp()) + ttl_seconds,
+        })
+        return ticket
+
+    def take_ws_ticket(self, ticket: str):
+        """Return the ticket's binding and delete it (single use). None if missing/expired."""
+        key = {"PK": f"WSTICKET#{ticket}", "SK": "META"}
+        out = self.table.delete_item(Key=key, ReturnValues="ALL_OLD").get("Attributes")
+        if not out:
+            return None
+        out = from_dynamo(out)
+        if out.get("ttl", 0) < datetime.now(UTC).timestamp():
+            return None
+        return {"consultId": out["consultId"], "doctorId": out["doctorId"]}
+
+    def add_connection(self, connection_id: str, consult_id: str, doctor_id: str):
+        base = {"entity": "WSCONN", "connectionId": connection_id, "consultId": consult_id,
+                "doctorId": doctor_id, "connectedAt": now_iso()}
+        self._put({"PK": f"CONN#{connection_id}", "SK": "META", **base})
+        self._put({"PK": f"WSCONSULT#{consult_id}", "SK": f"CONN#{connection_id}", **base})
+
+    def get_connection(self, connection_id: str):
+        return self._get(f"CONN#{connection_id}", "META")
+
+    def remove_connection(self, connection_id: str):
+        conn = self.get_connection(connection_id)
+        self.table.delete_item(Key={"PK": f"CONN#{connection_id}", "SK": "META"})
+        if conn:
+            self.table.delete_item(Key={"PK": f"WSCONSULT#{conn['consultId']}",
+                                        "SK": f"CONN#{connection_id}"})
+
+    def list_connections(self, consult_id: str) -> list[str]:
+        return [c["connectionId"] for c in self._query(f"WSCONSULT#{consult_id}", "CONN#")]
+
     # -- reference tables (Tier 0) ----------------------------------------
 
     def load_reference_rows(self, table, rows: list[dict]) -> int:

@@ -65,6 +65,7 @@ Resources:
             - { AttributeName: SK, KeyType: RANGE }
           Projection: { ProjectionType: ALL }
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false }
+      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
 
   BrandsTable:
     Type: AWS::DynamoDB::Table
@@ -223,10 +224,15 @@ Resources:
           LLM_PROVIDER: mantle
           MANTLE_MODEL_ID: !Ref MantleModelId
           STATE_MACHINE_ARN: !Ref ApprovalStateMachine
+          WS_ENDPOINT: !Sub https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
         - S3ReadPolicy: { BucketName: !Sub "medscribe-${Env}-${AWS::AccountId}" }
         - StepFunctionsExecutionPolicy: { StateMachineName: !GetAtt ApprovalStateMachine.Name }
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/${Env}/POST/@connections/*
         - Statement:
             - Effect: Allow
               Action: ssm:GetParametersByPath
@@ -237,6 +243,9 @@ Resources:
         Prescription:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/prescription", Method: GET }
+        WsTicket:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/ws-ticket", Method: POST }
         PatientHistory:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/patients/{id}/history", Method: GET }
@@ -325,6 +334,100 @@ Resources:
             Path: /webhooks/whatsapp
             Method: POST
             Auth: { Authorizer: NONE }
+
+  # ---------------------------------------------------------------- websocket (step 14)
+  # Browsers cannot send an Authorization header on a WebSocket, and API Gateway
+  # WebSocket APIs have no JWT authoriser, so $connect exchanges a single-use
+  # ticket minted over the authorised REST API (POST /consults/{id}/ws-ticket).
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub medscribe-ws-${Env}
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  WsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub medscribe-ws-${Env}
+      CodeUri: ../backend
+      Handler: handlers.ws.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          LLM_PROVIDER: mantle
+          MANTLE_MODEL_ID: !Ref MantleModelId
+          WS_ENDPOINT: !Sub https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/${Env}/POST/@connections/*
+
+  WsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
+
+  WsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsFunction.Arn}/invocations
+
+  WsConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      Target: !Sub integrations/${WsIntegration}
+
+  WsDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      Target: !Sub integrations/${WsIntegration}
+
+  WsDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $default
+      Target: !Sub integrations/${WsIntegration}
+
+  WsAppendRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: transcript.append
+      Target: !Sub integrations/${WsIntegration}
+
+  WsRefreshRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: draft.refresh
+      Target: !Sub integrations/${WsIntegration}
+
+  WsStage:
+    Type: AWS::ApiGatewayV2::Stage
+    DependsOn: [WsConnectRoute, WsDisconnectRoute, WsDefaultRoute, WsAppendRoute, WsRefreshRoute]
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref Env
+      AutoDeploy: true
 
   # ---------------------------------------------------------------- approval pipeline
   PipelineFunction:
@@ -422,6 +525,9 @@ Resources:
         - LambdaInvokePolicy: { FunctionName: !Ref PipelineFunction }
 
 Outputs:
+  WebSocketUrl:
+    Description: wss URL for the dashboard (VITE_WS_URL).
+    Value: !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
   StateMachineArn:
     Value: !Ref ApprovalStateMachine
   ApiUrl:

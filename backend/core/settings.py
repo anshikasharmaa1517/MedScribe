@@ -49,6 +49,9 @@ WA_APP_SECRET = os.environ.get("WA_APP_SECRET", "")  # signs X-Hub-Signature-256
 WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "")  # our string, echoed in the GET handshake
 WA_TEST_NUMBER = os.environ.get("WA_TEST_NUMBER", "")  # E.164 of the sender, for the QR
 
+# WebSocket push (stack output WebSocketEndpoint, the https:// management form). Unset = REST only.
+WS_ENDPOINT = os.environ.get("WS_ENDPOINT", "")
+
 # Post-approval Step Functions state machine (stack output). Unset = approve persists inline.
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 

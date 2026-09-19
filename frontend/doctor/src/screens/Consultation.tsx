@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, usingMock } from "../api";
 import { DraftPanel } from "../components/DraftPanel";
 import { Transcript } from "../components/Transcript";
 import { transcriptSource } from "../stt";
+import { ConsultSocket, wsConfigured } from "../ws";
 import type { Consult, Draft, DraftPatch, Patient, Prescription, Speaker, TranscriptLine } from "../types";
 
 const POLL_MS = 3000;
@@ -23,6 +24,9 @@ export function Consultation({ patient, onBack }: Props) {
   const seq = useRef(0);
   const source = useRef(transcriptSource());
   const patching = useRef(0);
+  const socket = useRef<ConsultSocket | null>(null);
+  const [transport, setTransport] = useState<"ws" | "poll">(wsConfigured && !usingMock ? "ws" : "poll");
+  const [wsStatus, setWsStatus] = useState<"connecting" | "open" | "closed">("closed");
 
   useEffect(() => {
     api.createConsult(patient.patientId).then(setConsult).catch((e) => setError(String(e.message ?? e)));
@@ -33,7 +37,7 @@ export function Consultation({ patient, onBack }: Props) {
   // Poll the draft. Skip a tick while a PATCH is in flight so a stale poll
   // can't briefly undo the doctor's edit on screen.
   useEffect(() => {
-    if (!consult || approved) return;
+    if (!consult || approved || transport !== "poll") return;
     let live = true;
     const tick = async () => {
       if (patching.current > 0) return;
@@ -45,15 +49,31 @@ export function Consultation({ patient, onBack }: Props) {
     tick();
     const id = window.setInterval(tick, POLL_MS);
     return () => { live = false; clearInterval(id); };
-  }, [consult, approved]);
+  }, [consult, approved, transport]);
+
+  // WebSocket transport: the server pushes draft.update; polling is the fallback.
+  useEffect(() => {
+    if (!consult || approved || transport !== "ws") return;
+    const s = new ConsultSocket(consult.consultId, {
+      onDraft: (d) => { if (patching.current === 0) setDraft(d); },
+      onError: (msg) => setError(msg),
+      onFallback: (reason) => { setError(`live connection lost (${reason}) — switched to polling`); setTransport("poll"); },
+      onStatus: setWsStatus,
+    });
+    socket.current = s;
+    s.open();
+    api.getDraft(consult.consultId).then((d) => { if (patching.current === 0) setDraft(d); }).catch(() => {});
+    return () => { s.close(); socket.current = null; };
+  }, [consult, approved, transport]);
 
   const onLine = useCallback((line: { speaker: Speaker; text: string }) => {
     if (!consult) return;
     const entry: TranscriptLine = { ...line, seq: ++seq.current, at: new Date().toISOString() };
     setLines((prev) => [...prev, entry]);
-    api.appendTranscript(consult.consultId, { text: line.text, speaker: line.speaker, seq: entry.seq })
-      .catch((e) => setError(String(e.message ?? e)));
-  }, [consult]);
+    const payload = { text: line.text, speaker: line.speaker, seq: entry.seq };
+    if (transport === "ws" && socket.current) socket.current.appendTranscript(payload);
+    else api.appendTranscript(consult.consultId, payload).catch((e) => setError(String(e.message ?? e)));
+  }, [consult, transport]);
 
   const toggleRecording = async () => {
     if (recording) { source.current.stop(); setRecording(false); setPartial(""); return; }
@@ -111,6 +131,9 @@ export function Consultation({ patient, onBack }: Props) {
         <span className="who">
           <strong>{patient.name}</strong>
           <span className="muted"> {patient.age ? `${patient.age}` : ""}{patient.sex ? ` / ${patient.sex}` : ""} · {patient.phone}</span>
+        </span>
+        <span className={`pill ${transport === "ws" && wsStatus === "open" ? "live" : "warn"}`} title="transport">
+          {transport === "ws" ? (wsStatus === "open" ? "live" : wsStatus) : "polling"}
         </span>
         <span className="muted small-text">{consult ? consult.consultId : "starting…"}</span>
       </header>

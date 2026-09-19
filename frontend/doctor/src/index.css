@@ -102,3 +102,4 @@ select { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); bor
 .review th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #f9fafb; }
 .actions-cell { white-space: nowrap; }
 .actions-cell .btn + .btn { margin-left: .4rem; }
+.pill.live { background: var(--green-bg); color: var(--green); }

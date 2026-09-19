@@ -44,6 +44,7 @@ const realApi: Api = {
   patchDraft: (id, patch: DraftPatch) => call<Draft>("PATCH", `/consults/${id}/draft`, patch),
   approve: (id) => call("POST", `/consults/${id}/approve`),
   getPrescription: (id) => call<Prescription>("GET", `/consults/${id}/prescription`),
+  wsTicket: (id) => call("POST", `/consults/${id}/ws-ticket`),
   listPending: () => call<Proposal[]>("GET", "/review/pending"),
   review: (createdAt, propId, decision) =>
     call("POST", `/review/${encodeURIComponent(createdAt)}/${propId}`, { decision }),
