@@ -7,8 +7,9 @@ Every step is idempotent on rxId so a Step Functions retry cannot double-send
 or double-write: prescriptions are keyed on a fixed approvedAt, sends check the
 stored sentAt first, reminders use deterministic ids.
 """
+import json
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 import boto3
 
@@ -19,11 +20,16 @@ from handlers.api import _load_secrets_from_ssm  # noqa: E402
 
 _load_secrets_from_ssm()
 
-from core import messaging, pdf  # noqa: E402
+from core import messaging, pdf, reminders  # noqa: E402
 from core.llm import get_client  # noqa: E402
 from core.pipeline import empty_draft, process, validate_state  # noqa: E402
 from core.reference import brand_label, default_reference  # noqa: E402
-from core.settings import MEDSCRIBE_BUCKET  # noqa: E402
+from core.settings import (  # noqa: E402
+    MEDSCRIBE_BUCKET,
+    REMINDER_FUNCTION_ARN,
+    SCHEDULE_GROUP,
+    SCHEDULER_ROLE_ARN,
+)
 from core.store import Store, now_iso  # noqa: E402
 
 _store = None
@@ -239,48 +245,41 @@ def send_generics(inp: dict) -> dict:
     return {**inp, "genericsSend": {"at": at, "result": result}}
 
 
-SLOT_HOURS = {"1-0-0": [9], "0-1-0": [14], "0-0-1": [21], "1-0-1": [9, 21], "1-1-1": [9, 14, 21],
-              "1-1-0": [9, 14], "0-1-1": [14, 21], "OD": [9], "BD": [9, 21], "TDS": [9, 14, 21],
-              "QID": [8, 12, 16, 21], "HS": [21]}
+_scheduler = None
 
 
-def _days(duration: str | None) -> int:
-    if not duration:
-        return 5
-    num = "".join(ch for ch in duration if ch.isdigit())
-    n = int(num) if num else 5
-    if "week" in duration or "hafte" in duration:
-        n *= 7
-    if "month" in duration or "mahine" in duration:
-        n *= 30
-    return max(1, min(n, 90))
+def scheduler():
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = boto3.client("scheduler")
+    return _scheduler
 
 
-def reminder_plan(rx: dict, start: datetime) -> list[dict]:
-    """Deterministic reminder ids: rem-<rxId>-<brandId|idx>-<YYYYMMDD>-<HH>. Times in IST."""
-    plan = []
-    for i, m in enumerate(rx.get("medicines", [])):
-        hours = SLOT_HOURS.get(str(m.get("frequency") or ""))
-        if not hours:
-            continue
-        key = m.get("brand_id") or f"m{i}"
-        shift = {"after food": 0.5, "before food": -0.5}.get(m.get("food_relation") or "", 0)
-        for d in range(_days(m.get("duration"))):
-            day = start + timedelta(days=d)
-            for h in hours:
-                midnight = day.replace(hour=0, minute=0, second=0, microsecond=0)
-                due = midnight + timedelta(hours=h + shift)
-                if due <= start:
-                    continue
-                plan.append({
-                    "remId": f"rem-{rx['rxId']}-{key}-{due.strftime('%Y%m%d-%H%M')}",
-                    "dueAt": due.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "brand_id": m.get("brand_id"), "label": m.get("label"),
-                    "text": (f"Time for {m.get('label')}: {messaging.plain_timing(m)}. "
-                             "Reply TAKEN once you've had it."),
-                    "rxId": rx["rxId"],
-                })
-    return plan
+def _put_schedule(spec: dict) -> str:
+    """Create (or, on retry, update) one EventBridge schedule. Returns created|updated|skipped."""
+    if not (REMINDER_FUNCTION_ARN and SCHEDULER_ROLE_ARN):
+        return "skipped"
+    common = {
+        "Name": spec["name"], "GroupName": SCHEDULE_GROUP,
+        "ScheduleExpressionTimezone": spec["timezone"],
+        "FlexibleTimeWindow": {"Mode": "OFF"},
+        "ActionAfterCompletion": "DELETE",       # schedules self-expire at the course end
+        "Target": {"Arn": REMINDER_FUNCTION_ARN, "RoleArn": SCHEDULER_ROLE_ARN,
+                   "Input": json.dumps(spec["input"]),
+                   "RetryPolicy": {"MaximumRetryAttempts": 2, "MaximumEventAgeInSeconds": 3600}},
+    }
+    if "at" in spec:
+        common["ScheduleExpression"] = f"at({spec['at'].strftime('%Y-%m-%dT%H:%M:%S')})"
+    else:
+        common["ScheduleExpression"] = spec["cron"]
+        common["StartDate"] = spec["startAt"]
+        common["EndDate"] = spec["endAt"]
+    try:
+        scheduler().create_schedule(**common)
+        return "created"
+    except scheduler().exceptions.ConflictException:
+        scheduler().update_schedule(**common)
+        return "updated"
 
 
 def schedule_reminders(inp: dict) -> dict:
@@ -288,16 +287,18 @@ def schedule_reminders(inp: dict) -> dict:
     if rx.get("remindersScheduledAt"):
         return {**inp, "reminders": {"skipped": "already scheduled",
                                      "count": rx.get("reminderCount", 0)}}
-    ist = timezone(timedelta(hours=5, minutes=30))
-    start = datetime.now(ist)
-    plan = reminder_plan(rx, start)
-    for r in plan:
+    now = datetime.now(UTC)
+    rows = reminders.dose_rows(rx, now)
+    for r in rows:
         store().put_reminder(rx["patientId"], r)   # deterministic remId -> idempotent
-    # EventBridge Scheduler wiring is step 12; rows are the source of truth it will read.
+    schedules = reminders.course_schedules(rx, now)
+    results = {sched["name"]: _put_schedule(sched) for sched in schedules}
     at = now_iso()
-    store().put_prescription(rx["patientId"], rx["doctorId"],
-                             {**rx, "remindersScheduledAt": at, "reminderCount": len(plan)})
-    return {**inp, "reminders": {"count": len(plan), "at": at}}
+    store().put_prescription(rx["patientId"], rx["doctorId"], {
+        **rx, "remindersScheduledAt": at, "reminderCount": len(rows),
+        "reminderSchedules": [{"name": s_["name"], "input": s_["input"]} for s_ in schedules],
+    })
+    return {**inp, "reminders": {"count": len(rows), "schedules": results, "at": at}}
 
 
 def mark_failed(inp: dict) -> dict:

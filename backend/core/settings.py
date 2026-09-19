@@ -45,6 +45,13 @@ WA_API_VERSION = os.environ.get("WA_API_VERSION", "v23.0")
 # Post-approval Step Functions state machine (stack output). Unset = approve persists inline.
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 
+# Reminders: EventBridge Scheduler targets the reminder Lambda via SCHEDULER_ROLE_ARN.
+# Unset = ScheduleReminders writes the plan rows only (tests, first deploy).
+REMINDER_FUNCTION_ARN = os.environ.get("REMINDER_FUNCTION_ARN", "")
+SCHEDULER_ROLE_ARN = os.environ.get("SCHEDULER_ROLE_ARN", "")
+SCHEDULE_GROUP = os.environ.get("SCHEDULE_GROUP", "default")
+WA_REMINDER_TEMPLATE = os.environ.get("WA_REMINDER_TEMPLATE", "medicine_reminder")
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mantle")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")

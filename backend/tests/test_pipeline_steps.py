@@ -4,7 +4,6 @@ The LLM is stubbed, WeasyPrint is absent locally (so RenderPDF takes the HTML
 fallback), and messaging is in DRY_RUN - exactly the shape of a first deploy.
 """
 import os
-from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
@@ -85,6 +84,8 @@ def test_happy_path_end_to_end(env):
     assert "1 tablet morning, 1 tablet night" in sent[1]["payload"]["text"]["body"]
     assert "Crocin" in out["genericsSend"]["result"]["payload"]["text"]["body"]
     assert out["reminders"]["count"] > 0
+    assert out["reminders"]["schedules"]                      # one per medicine x slot (+ visit)
+    assert all(v == "skipped" for v in out["reminders"]["schedules"].values())  # no scheduler ARN
     assert st.list_reminders("pat-demo-001")
 
 
@@ -121,7 +122,7 @@ def test_locked_doctor_edits_survive_final_pass_and_land_in_audit(env):
     draft = apply_patch(draft, {"medicine": {"med_key": "B025", "deleted": True}})
     st.update_consultation(c, draft=draft)
 
-    out = run(steps, FULL[:5], inp)
+    run(steps, FULL[:5], inp)
     rx = st.get_prescription("pat-demo-001", inp["approvedAt"], inp["rxId"])
     assert [m["label"] for m in rx["medicines"]] == ["Dolo 650mg"]
     assert rx["medicines"][0]["frequency"] == "1-1-1"
@@ -131,7 +132,8 @@ def test_locked_doctor_edits_survive_final_pass_and_land_in_audit(env):
 def test_sends_and_reminders_are_idempotent_on_retry(env):
     steps, st, _ = env
     out = run(steps, FULL, start_consult(st))
-    again = run(steps, ["persist_rx", "send_prescription", "send_generics", "schedule_reminders"], out)
+    later = ["persist_rx", "send_prescription", "send_generics", "schedule_reminders"]
+    again = run(steps, later, out)
     assert again["prescriptionSend"]["skipped"] == "already sent"
     assert again["genericsSend"]["skipped"] == "already sent"
     assert again["reminders"]["skipped"] == "already scheduled"
@@ -152,29 +154,6 @@ def test_mark_failed_records_error(env):
     out = steps.handler({"step": "mark_failed", "input": {**inp, "error": {"Error": "Boom"}}}, None)
     assert out["markedFailed"]
     assert st.get_consult_by_id(inp["consultId"])["status"] == "APPROVAL_FAILED"
-
-
-def test_reminder_plan_slots_and_ids():
-    from handlers.pipeline_steps import reminder_plan
-
-    ist = timezone(timedelta(hours=5, minutes=30))
-    start = datetime(2026, 9, 19, 8, 0, tzinfo=ist)
-    rx = {"rxId": "r1", "medicines": [
-        {"brand_id": "B001", "label": "Dolo 650mg", "frequency": "1-0-1", "food_relation": "after food",
-         "duration": "2 days"},
-        {"brand_id": "B085", "label": "Pan 40mg", "frequency": "OD", "food_relation": "before food",
-         "duration": "1 week"},
-        {"brand_id": "B999", "label": "Odd", "frequency": None},
-    ]}
-    plan = reminder_plan(rx, start)
-    dolo = [p for p in plan if p["brand_id"] == "B001"]
-    pan = [p for p in plan if p["brand_id"] == "B085"]
-    assert len(dolo) == 4 and len(pan) == 7 and not [p for p in plan if p["brand_id"] == "B999"]
-    assert dolo[0]["remId"] == "rem-r1-B001-20260919-0930"          # 09:00 + 30 min after food
-    assert dolo[0]["dueAt"] == "2026-09-19T04:00:00Z"                # 09:30 IST
-    assert pan[0]["remId"] == "rem-r1-B085-20260919-0830"            # 09:00 - 30 min before food
-    assert len({p["remId"] for p in plan}) == len(plan)
-    assert "Reply TAKEN" in dolo[0]["text"]
 
 
 def test_unknown_step_raises(env):
