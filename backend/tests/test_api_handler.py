@@ -237,3 +237,5 @@ def test_review_queue_requires_reviewer_group(api):
     assert res["statusCode"] == 200 and json.loads(res["body"])["status"] == "REJECTED"
     assert len(api.store().list_pending_proposals()) == 1
     assert api.store().count_reference(api.store().brands) == 0   # nothing promoted, ever
+    res = api.handler(ev, None)                                     # deciding twice -> 404
+    assert res["statusCode"] == 404

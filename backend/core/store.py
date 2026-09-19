@@ -405,12 +405,17 @@ class Store:
     def review_proposal(self, created_at: str, prop_id: str, decision: str, reviewer: str):
         if decision not in ("APPROVED", "REJECTED"):
             raise ValueError("decision must be APPROVED or REJECTED")
-        self.table.update_item(
-            Key={"PK": "QUEUE", "SK": f"PENDING#{created_at}#{prop_id}"},
-            UpdateExpression="SET #s = :s, reviewedBy = :r, reviewedAt = :t",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":s": decision, ":r": reviewer, ":t": now_iso()},
-        )
+        try:
+            self.table.update_item(
+                Key={"PK": "QUEUE", "SK": f"PENDING#{created_at}#{prop_id}"},
+                UpdateExpression="SET #s = :s, reviewedBy = :r, reviewedAt = :t",
+                ConditionExpression="attribute_exists(PK) AND #s = :pending",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":s": decision, ":r": reviewer, ":t": now_iso(),
+                                           ":pending": "PENDING"},
+            )
+        except self.table.meta.client.exceptions.ConditionalCheckFailedException as e:
+            raise KeyError(f"no pending proposal {prop_id}") from e
 
     # -- reference tables (Tier 0) ----------------------------------------
 

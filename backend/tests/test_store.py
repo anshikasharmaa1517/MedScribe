@@ -108,6 +108,11 @@ def test_review_queue_never_touches_reference_tables(store):
 
     with pytest.raises(ValueError):
         store.review_proposal(p["createdAt"], p["propId"], "MAYBE", reviewer="admin")
+    with pytest.raises(KeyError):                       # already decided
+        store.review_proposal(p["createdAt"], p["propId"], "REJECTED", reviewer="admin")
+    with pytest.raises(KeyError):                       # never existed - no upsert
+        store.review_proposal("2026-01-01T00:00:00Z", "ghost", "APPROVED", reviewer="admin")
+    assert store._get("QUEUE", "PENDING#2026-01-01T00:00:00Z#ghost") is None
 
 
 def test_dynamo_conversions():

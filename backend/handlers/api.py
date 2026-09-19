@@ -371,7 +371,10 @@ def review(event: dict, created_at: str, prop_id: str, body: dict) -> dict:
     if decision not in ("APPROVED", "REJECTED"):
         raise HttpError(400, "decision must be APPROVED or REJECTED")
     reviewer = claims_of(event).get("email") or claims_of(event).get("sub", "reviewer")
-    store().review_proposal(created_at, prop_id, decision, reviewer=reviewer)
+    try:
+        store().review_proposal(created_at, prop_id, decision, reviewer=reviewer)
+    except KeyError as e:
+        raise HttpError(404, str(e)) from e
     return {"status": decision, "propId": prop_id}
 
 
