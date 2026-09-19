@@ -5,7 +5,7 @@
 
 import brandsJson from "./brands.json";
 import type {
-  Api, BrandHit, Consult, Draft, Medicine, Patient, Prescription, Speaker, TranscriptLine,
+  Api, BrandHit, Consult, Draft, Medicine, Patient, Prescription, Proposal, Speaker, TranscriptLine,
 } from "../types";
 
 const brands = brandsJson as BrandHit[];
@@ -117,6 +117,15 @@ function extract(transcript: TranscriptLine[], prior: Draft): Draft {
   return validate(next);
 }
 
+const pending: Proposal[] = [
+  { propId: "prop-demo-001", createdAt: "2026-09-15T09:00:00Z", status: "PENDING", source: "web-search", spoken: "zerodol th",
+    proposed_brand: "Zerodol TH 4mg", proposed_salts: ["Aceclofenac", "Thiocolchicoside"], confidence: 0.71,
+    evidence_url: "https://www.1mg.com/drugs/zerodol-th-tablet", note: "Combination not in Tier 0; seen twice this week." },
+  { propId: "prop-demo-002", createdAt: "2026-09-16T14:30:00Z", status: "PENDING", source: "web-search", spoken: "sompraz d",
+    proposed_brand: "Sompraz D 40mg", proposed_salts: ["Esomeprazole", "Domperidone"], confidence: 0.64,
+    evidence_url: "https://www.1mg.com/drugs/sompraz-d-40-capsule", note: "Patient reported taking this." },
+];
+
 const consults = new Map<string, Consult>();
 const timers = new Map<string, number>();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -193,6 +202,16 @@ export const mockApi: Api = {
       sentAt: now(), document: { format: "html", url: "data:text/html," + encodeURIComponent("<h1>Mock prescription " + c.rxId + "</h1>"), expires_in: 3600 },
     };
     return rx;
+  },
+
+  async listPending() {
+    return pending.filter((p) => p.status === "PENDING");
+  },
+
+  async review(_createdAt, propId, decision) {
+    const p = pending.find((x) => x.propId === propId);
+    if (p) p.status = decision;
+    return { status: decision };
   },
 
   async searchBrands(q) {

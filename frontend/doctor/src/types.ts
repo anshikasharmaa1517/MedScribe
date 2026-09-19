@@ -77,6 +77,12 @@ export type Prescription = {
   document: { format: "pdf" | "html"; url: string; expires_in: number } | null;
 };
 
+export type Proposal = {
+  propId: string; createdAt: string; status: string; source?: string;
+  spoken?: string; proposed_brand?: string; proposed_salts?: string[];
+  evidence_url?: string; confidence?: number; note?: string;
+};
+
 export type MedicinePatch =
   | { med_key: string; frequency?: string | null; food_relation?: string | null; duration?: string | null }
   | { med_key: string; brand_id: string }
@@ -99,5 +105,7 @@ export interface Api {
   patchDraft(id: string, patch: DraftPatch): Promise<Draft>;
   approve(id: string): Promise<{ status: string; rxId: string }>;
   getPrescription(id: string): Promise<Prescription>;
+  listPending(): Promise<Proposal[]>;
+  review(createdAt: string, propId: string, decision: "APPROVED" | "REJECTED"): Promise<{ status: string }>;
   searchBrands(q: string): Promise<BrandHit[]>;
 }
