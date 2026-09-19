@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Prescription {{ rx.rx_id }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", "Noto Sans", Arial, sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.4; }
+  header { border-bottom: 2px solid #1a1a1a; padding-bottom: 6mm; margin-bottom: 6mm; display: flex; justify-content: space-between; }
+  .doctor h1 { font-size: 16pt; margin: 0 0 1mm 0; }
+  .doctor .degree, .doctor .clinic { font-size: 10pt; color: #333; }
+  .doctor .reg { font-size: 9.5pt; color: #333; margin-top: 1mm; }
+  .rx-mark { font-size: 26pt; font-weight: bold; color: #1a1a1a; align-self: flex-start; }
+  .patient { display: flex; justify-content: space-between; font-size: 10.5pt; margin-bottom: 6mm; padding: 3mm 0; border-bottom: 1px solid #bbb; }
+  .patient span b { font-weight: 600; }
+  h2 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.06em; color: #555; margin: 5mm 0 1.5mm 0; }
+  p { margin: 0 0 1mm 0; }
+  ol.meds { padding-left: 0; list-style: none; margin: 0; counter-reset: med; }
+  ol.meds li { counter-increment: med; margin: 0 0 4mm 0; padding-left: 8mm; position: relative; page-break-inside: avoid; }
+  ol.meds li::before { content: counter(med) "."; position: absolute; left: 0; font-weight: 600; }
+  .salts { font-weight: 700; letter-spacing: 0.02em; }
+  .brand { font-weight: 400; }
+  .form { color: #444; }
+  .dose { margin-top: 0.5mm; color: #222; }
+  .empty { color: #777; font-style: italic; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8.5pt; color: #666; border-top: 1px solid #bbb; padding-top: 2mm; display: flex; justify-content: space-between; }
+  .sign { margin-top: 14mm; text-align: right; }
+  .sign .line { display: inline-block; border-top: 1px solid #1a1a1a; padding-top: 1.5mm; min-width: 55mm; text-align: center; font-size: 10pt; }
+</style>
+</head>
+<body>
+<header>
+  <div class="doctor">
+    <h1>{{ doctor.name }}</h1>
+    <div class="degree">{{ doctor.degree }}</div>
+    <div class="clinic">{{ doctor.clinic }}{% if doctor.clinic_address %}, {{ doctor.clinic_address }}{% endif %}</div>
+    <div class="reg">Reg. No. {{ doctor.registration_number }}</div>
+  </div>
+  <div class="rx-mark">℞</div>
+</header>
+
+<section class="patient">
+  <span><b>Patient:</b> {{ patient.name }}{% if patient.age_sex %} ({{ patient.age_sex }}){% endif %}</span>
+  <span><b>ID:</b> {{ patient.patient_id }}</span>
+  <span><b>Date:</b> {{ rx.date }}</span>
+</section>
+
+<h2>Symptoms</h2>
+{% if rx.symptoms %}<p>{{ rx.symptoms | join(", ") }}</p>{% else %}<p class="empty">Not recorded</p>{% endif %}
+
+<h2>Diagnosis</h2>
+{% if rx.diagnosis %}<p>{{ rx.diagnosis }}</p>{% else %}<p class="empty">Not recorded</p>{% endif %}
+
+{% if rx.tests_advised %}
+<h2>Tests advised</h2>
+<p>{{ rx.tests_advised | join(", ") }}</p>
+{% endif %}
+
+<h2>Medicines</h2>
+<ol class="meds">
+{% for m in medicines %}
+  <li>
+    <div>
+      <span class="salts">{{ m.salt_line }}</span>
+      <span class="brand">({{ m.brand_label }})</span>
+      {% if m.form %}<span class="form">— {{ m.form }}</span>{% endif %}
+    </div>
+    {% if m.dose_line %}<div class="dose">{{ m.dose_line }}</div>{% endif %}
+  </li>
+{% endfor %}
+</ol>
+
+{% if rx.next_visit %}
+<h2>Follow-up</h2>
+<p>{{ rx.next_visit }}</p>
+{% endif %}
+
+<div class="sign"><span class="line">{{ doctor.name }}</span></div>
+
+<footer>
+  <span>{{ doctor.clinic }} · Reg. No. {{ doctor.registration_number }}</span>
+  <span>Rx {{ rx.rx_id }}</span>
+</footer>
+</body>
+</html>

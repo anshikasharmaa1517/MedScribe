@@ -31,6 +31,10 @@ SALTS_TABLE = os.environ.get("SALTS_TABLE", "salts")
 CONDITIONS_TABLE = os.environ.get("CONDITIONS_TABLE", "conditions")
 DYNAMODB_ENDPOINT_URL = os.environ.get("DYNAMODB_ENDPOINT_URL") or None
 
+# S3 bucket for rx PDFs and audio (stack output BucketName). Presigned URL lifetime.
+MEDSCRIBE_BUCKET = os.environ.get("MEDSCRIBE_BUCKET", "")
+PDF_URL_TTL_SECONDS = int(os.environ.get("PDF_URL_TTL_SECONDS", 24 * 3600))
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mantle")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
