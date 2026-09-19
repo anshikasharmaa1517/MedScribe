@@ -94,3 +94,5 @@ select { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); bor
 .login-card .btn { margin-top: .5rem; }
 .sessionbar { max-width: 1280px; margin: 0 auto; padding: .4rem 1rem 0; display: flex; justify-content: flex-end; gap: .75rem; align-items: center; font-size: .85rem; }
 .line.partial .text { color: var(--muted); font-style: italic; }
+.green-bg { background: var(--green-bg); color: var(--green); }
+.notice a { color: inherit; font-weight: 600; }

@@ -35,6 +35,16 @@ DYNAMODB_ENDPOINT_URL = os.environ.get("DYNAMODB_ENDPOINT_URL") or None
 MEDSCRIBE_BUCKET = os.environ.get("MEDSCRIBE_BUCKET", "")
 PDF_URL_TTL_SECONDS = int(os.environ.get("PDF_URL_TTL_SECONDS", 24 * 3600))
 
+# Outbound WhatsApp. DRY_RUN defaults ON: nothing is sent unless explicitly enabled.
+DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
+WA_PROVIDER = os.environ.get("WA_PROVIDER", "meta")
+WA_PHONE_NUMBER_ID = os.environ.get("WA_PHONE_NUMBER_ID", "")
+WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "")
+WA_API_VERSION = os.environ.get("WA_API_VERSION", "v23.0")
+
+# Post-approval Step Functions state machine (stack output). Unset = approve persists inline.
+STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mantle")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")

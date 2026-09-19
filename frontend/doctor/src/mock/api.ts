@@ -5,7 +5,7 @@
 
 import brandsJson from "./brands.json";
 import type {
-  Api, BrandHit, Consult, Draft, Medicine, Patient, Speaker, TranscriptLine,
+  Api, BrandHit, Consult, Draft, Medicine, Patient, Prescription, Speaker, TranscriptLine,
 } from "../types";
 
 const brands = brandsJson as BrandHit[];
@@ -179,7 +179,20 @@ export const mockApi: Api = {
     const c = await this.getConsult(id);
     if (c.draft.blocks_approval) throw new Error("409: unresolved medicines block approval");
     c.status = "APPROVED";
-    return { status: "APPROVED", rxId: `rx-${c.consultId}` };
+    c.rxId = `rx-${c.consultId}`;
+    return { status: "APPROVED", rxId: c.rxId };
+  },
+
+  async getPrescription(id) {
+    const c = await this.getConsult(id);
+    if (c.status !== "APPROVED" || !c.rxId) throw new Error("consult has no approved prescription yet");
+    const meds = c.draft.medicines.filter((x) => !x.deleted);
+    const rx: Prescription = {
+      rxId: c.rxId, approvedAt: now(), diagnosis: c.draft.diagnosis,
+      medicines: meds.map((x) => ({ brand_id: x.brand_id, label: x.matched ?? x.spoken, frequency: x.frequency, food_relation: x.food_relation, duration: x.duration })),
+      sentAt: now(), document: { format: "html", url: "data:text/html," + encodeURIComponent("<h1>Mock prescription " + c.rxId + "</h1>"), expires_in: 3600 },
+    };
+    return rx;
   },
 
   async searchBrands(q) {

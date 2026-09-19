@@ -45,13 +45,14 @@ from core.draft_edit import PatchError, apply_patch  # noqa: E402
 from core.llm import get_client  # noqa: E402
 from core.pipeline import empty_draft, process  # noqa: E402
 from core.reference import default_reference  # noqa: E402
-from core.settings import EXTRACTION_INTERVAL_SECONDS  # noqa: E402
-from core.store import Store, now_iso  # noqa: E402
+from core.settings import EXTRACTION_INTERVAL_SECONDS, STATE_MACHINE_ARN  # noqa: E402
+from core.store import Store, new_id, now_iso  # noqa: E402
 
 ALLOW_HEADER_AUTH = os.environ.get("ALLOW_HEADER_AUTH", "false").lower() == "true"
 
 _store = None
 _client = None
+_sfn = None
 
 
 def store() -> Store:
@@ -66,6 +67,13 @@ def llm():
     if _client is None:
         _client = get_client()
     return _client
+
+
+def sfn():
+    global _sfn
+    if _sfn is None:
+        _sfn = boto3.client("stepfunctions")
+    return _sfn
 
 
 # -- http plumbing -----------------------------------------------------------
@@ -135,6 +143,8 @@ def public_consult(c: dict) -> dict:
         "consultId": c["consultId"], "patientId": c["patientId"], "doctorId": c["doctorId"],
         "status": c.get("status", "LIVE"), "createdAt": c["createdAt"],
         "transcript": c.get("transcript", []), "draft": c.get("draft") or empty_draft(),
+        "rxId": c.get("rxId"), "approvalError": c.get("approvalError"),
+        "approvalBlockedBy": c.get("approvalBlockedBy"),
     }
 
 
@@ -197,16 +207,33 @@ def patch_draft(c: dict, body: dict) -> dict:
 
 
 def approve(c: dict) -> dict:
+    """Start the post-approval pipeline (spec §3). Without a state machine (tests,
+    local), persist inline so the API still completes the story end to end."""
     if c.get("status") == "APPROVED":
         return {"status": "APPROVED", "rxId": c.get("rxId")}
+    if c.get("status") == "APPROVING":
+        return {"status": "APPROVING", "rxId": c.get("rxId"), "executionArn": c.get("executionArn")}
     draft = c.get("draft") or empty_draft()
     if draft.get("blocks_approval"):
         raise HttpError(409, "unresolved medicines block approval")
     meds = [m for m in draft.get("medicines", []) if not m.get("deleted")]
     if not meds:
         raise HttpError(409, "no medicines to prescribe")
+
+    rx_id, approved_at = new_id(), now_iso()
+    if STATE_MACHINE_ARN:
+        run = sfn().start_execution(
+            stateMachineArn=STATE_MACHINE_ARN,
+            name=f"approve-{c['consultId']}-{rx_id}",
+            input=json.dumps({"consultId": c["consultId"], "patientId": c["patientId"],
+                              "doctorId": c["doctorId"], "rxId": rx_id, "approvedAt": approved_at}),
+        )
+        store().update_consultation(c, status="APPROVING", rxId=rx_id,
+                                    executionArn=run["executionArn"])
+        return {"status": "APPROVING", "rxId": rx_id, "executionArn": run["executionArn"]}
+
     rx = store().put_prescription(c["patientId"], c["doctorId"], {
-        "consultId": c["consultId"],
+        "rxId": rx_id, "createdAt": approved_at, "consultId": c["consultId"],
         "symptoms": draft.get("symptoms", []),
         "diagnosis": draft.get("diagnosis"),
         "conditions_matched": draft.get("conditions_matched", []),
@@ -219,13 +246,31 @@ def approve(c: dict) -> dict:
         } for m in meds],
         "next_visit": draft.get("next_visit"),
         "status": "APPROVED",
-        "approvedAt": now_iso(),
+        "approvedAt": approved_at,
     })
     for m in meds:
         if m.get("brand_id"):
             store().bump_shortlist(c["doctorId"], m["brand_id"])
     store().update_consultation(c, status="APPROVED", rxId=rx["rxId"], approvedAt=rx["approvedAt"])
     return {"status": "APPROVED", "rxId": rx["rxId"]}
+
+
+def prescription(c: dict) -> dict:
+    """The approved prescription plus a fresh presigned link to its document."""
+    if c.get("status") != "APPROVED" or not c.get("rxId"):
+        raise HttpError(404, "consult has no approved prescription yet")
+    rx = store().get_prescription(c["patientId"], c["approvedAt"], c["rxId"])
+    if not rx:
+        raise HttpError(404, "prescription not found")
+    doc = rx.get("document") or c.get("document") or {}
+    out = {"rxId": rx["rxId"], "approvedAt": rx.get("approvedAt"), "diagnosis": rx.get("diagnosis"),
+           "medicines": rx.get("medicines", []), "sentAt": rx.get("sentAt"),
+           "document": None}
+    if doc.get("key"):
+        url = boto3.client("s3").generate_presigned_url(
+            "get_object", Params={"Bucket": doc["bucket"], "Key": doc["key"]}, ExpiresIn=3600)
+        out["document"] = {"format": doc.get("format"), "url": url, "expires_in": 3600}
+    return out
 
 
 def search_brands(event: dict) -> list[dict]:
@@ -262,7 +307,10 @@ def route(event: dict) -> dict:
         if sub == "draft" and method == "PATCH":
             return respond(200, patch_draft(c, body_of(event)))
         if sub == "approve" and method == "POST":
-            return respond(200, approve(c))
+            out = approve(c)
+            return respond(202 if out["status"] == "APPROVING" else 200, out)
+        if sub == "prescription" and method == "GET":
+            return respond(200, prescription(c))
     raise HttpError(404, f"no route for {method} {path}")
 
 

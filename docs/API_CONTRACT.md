@@ -18,7 +18,8 @@ All bodies are JSON. Errors: `{ "error": "<message>" }` with a 4xx/5xx status.
 | `POST` | `/consults/{id}/transcript` | `{ "text", "speaker": "doctor"\|"patient"\|null, "seq" }` | `{ "accepted": true, "seq" }` — appends; server debounces extraction (12 s) |
 | `GET` | `/consults/{id}/draft` | — | `Draft` (§6 shape below) |
 | `PATCH` | `/consults/{id}/draft` | `DraftPatch` | `Draft` — applies a doctor edit, sets `locked` |
-| `POST` | `/consults/{id}/approve` | — | `{ "status": "APPROVED", "rxId" }` — **409** if `draft.blocks_approval` |
+| `POST` | `/consults/{id}/approve` | — | **202** `{ "status": "APPROVING", "rxId", "executionArn" }` — starts the Step Functions pipeline; **409** if `draft.blocks_approval`. Poll `GET /consults/{id}` until `status` is `APPROVED`, `APPROVAL_FAILED` (see `approvalError`) or back to `LIVE` (final pass found a RESOLVE item; `approvalBlockedBy`). |
+| `GET` | `/consults/{id}/prescription` | — | `Prescription` — the approved rx plus `document: { format: "pdf"\|"html", url, expires_in }` (fresh 1 h presigned link); **404** until approved |
 | `GET` | `/brands?q=<text>` | — | `{ "brand_id", "label", "salt_ids" }[]` (max 20) — for the RESOLVE picker |
 
 `GET /consults/{id}/draft` is polled every 3 s by the dashboard until the
@@ -38,8 +39,9 @@ type Patient = { patientId: string; name: string; age?: number; sex?: "M"|"F";
                  phone: string; lastVisit?: string /* ISO */ };
 
 type Consult = { consultId: string; patientId: string; doctorId: string;
-                 status: "LIVE"|"APPROVED"|"CANCELLED"; createdAt: string;
-                 transcript: TranscriptLine[]; draft: Draft };
+                 status: "LIVE"|"APPROVING"|"APPROVED"|"APPROVAL_FAILED"|"CANCELLED";
+                 rxId?: string; approvalError?: string; approvalBlockedBy?: string[];
+                 createdAt: string; transcript: TranscriptLine[]; draft: Draft };
 
 type TranscriptLine = { seq: number; speaker: "doctor"|"patient"|null; text: string; at: string };
 
