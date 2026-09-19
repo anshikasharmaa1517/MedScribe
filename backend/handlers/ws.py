@@ -16,14 +16,14 @@ import logging
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
+# Secrets must land in os.environ before core.settings is first imported.
+from handlers.api import _load_secrets_from_ssm  # noqa: E402
+
+_load_secrets_from_ssm()
+
 from core import ws  # noqa: E402
 from core.settings import EXTRACTION_INTERVAL_SECONDS  # noqa: E402
-from handlers.api import (  # noqa: E402
-    HttpError,
-    append_transcript,
-    get_draft,
-    store,
-)
+from handlers.api import HttpError, append_transcript, get_draft, store  # noqa: E402
 
 
 def _reply(status: int, body: dict | None = None) -> dict:
