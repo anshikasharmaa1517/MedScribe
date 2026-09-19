@@ -116,7 +116,7 @@ have no brand, 2 have no condition mapping.
   replaced with the Meta Cloud API test number. Twilio code is gone; it's in git history
   (`d2bde23`, `17c9124`) if ever needed.
 - `core/messaging.py`: `send_text` / `send_template` / `send_document` via Graph
-  `POST /v23.0/{WA_PHONE_NUMBER_ID}/messages`; `valid_signature` checks
+  `POST /v25.0/{WA_PHONE_NUMBER_ID}/messages`; `valid_signature` checks
   `X-Hub-Signature-256` (HMAC-SHA256 of the raw body with `WA_APP_SECRET`).
   `send_whatsapp` is the plain-text alias the inbound router uses.
 - `handlers/whatsapp_webhook.py`: GET = Meta verification handshake (`WA_VERIFY_TOKEN`);

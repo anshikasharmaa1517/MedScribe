@@ -46,7 +46,7 @@ MANTLE_MODEL_ID = os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b")
 
 # WhatsApp via the Meta Cloud API (Graph). DRY_RUN defaults on: a real send is an
 # explicit decision, never a default. The test number can reach 5 verified recipients.
-WA_GRAPH_VERSION = os.environ.get("WA_GRAPH_VERSION", "v23.0")
+WA_GRAPH_VERSION = os.environ.get("WA_GRAPH_VERSION", "v25.0")
 WA_PHONE_NUMBER_ID = os.environ.get("WA_PHONE_NUMBER_ID", "")
 WA_BUSINESS_ACCOUNT_ID = os.environ.get("WA_BUSINESS_ACCOUNT_ID", "")
 WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "")

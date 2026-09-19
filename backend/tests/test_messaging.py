@@ -64,7 +64,7 @@ def test_text_send_posts_graph_payload_with_bearer_and_counts():
     captured = {}
     out = send_text("+919800000001", "hello", dry_run=False, meter=lambda: 1,
                     phone_number_id="123456", access_token="tok", post=make_post(captured))
-    assert captured["url"] == "https://graph.facebook.com/v23.0/123456/messages"
+    assert captured["url"] == "https://graph.facebook.com/v25.0/123456/messages"
     assert captured["token"] == "tok"
     assert captured["payload"] == {
         "messaging_product": "whatsapp", "recipient_type": "individual", "to": "919800000001",
