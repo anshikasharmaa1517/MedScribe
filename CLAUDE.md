@@ -2,7 +2,7 @@
 
 Full spec: `docs/CLAUDE_CODE_CONTEXT.md`. Extraction brief (done): `docs/BUILD_TASK_extraction_layer.md`.
 Infra: `infra/README.md` (deploy, secrets, seeding, **teardown checklist**).
-Step-by-step plan: `docs/BUILD_SEQUENCE.md` — **at step 6** (deploy + `/health` check pending).
+Step-by-step plan: `docs/BUILD_SEQUENCE.md` — steps 1–9 done; **step 10 (PDF) next**.
 
 ## Workflow
 
@@ -104,7 +104,7 @@ have no brand, 2 have no condition mapping.
   validator clean). Tests use moto — never real AWS.
 - `infra/template.yaml` + `samconfig.toml` — table + GSI1, reference tables, S3, two
   Cognito pools, HTTP API with Cognito JWT authoriser, `/health`, consultation API,
-  Twilio webhook. **Deployed** as stack `medscribe-dev`; tables seeded (Tier 0 + demo).
+  WhatsApp webhook. **Deployed** as stack `medscribe-dev`; tables seeded (Tier 0 + demo).
 - `core/messaging.py`, `core/inbound.py`, `handlers/whatsapp_webhook.py`,
   `scripts/generate_qr.py`, `scripts/send_test_message.py` — see the WhatsApp section.
 - 156 tests, all offline. `.claude/skills/medscribe-review` reviews diffs against the
