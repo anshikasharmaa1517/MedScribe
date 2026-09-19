@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from moto import mock_aws
 
-from core import reminders, store as store_mod
+from core import reminders
+from core import store as store_mod
 from core.store import Store, create_tables
 from scripts import seed_demo_data
 
