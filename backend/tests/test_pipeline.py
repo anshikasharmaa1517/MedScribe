@@ -170,3 +170,31 @@ def test_list_fields_are_copies(field):
     s = run(SAMPLE)
     s[field].append("x")
     assert "x" not in SAMPLE[field]
+
+
+def test_non_latin_spoken_name_keeps_identity_across_passes():
+    """Regression: a Devanagari spoken name produced an empty med_key, so after the
+    doctor resolved it the next pass appended a duplicate RESOLVE item."""
+    from core.draft_edit import apply_patch
+
+    hindi = extraction([med("डोलो फाइव हंड्रेड", "1-0-1")], "viral fever")
+    s1 = run(hindi)
+    junk = s1["medicines"][0]
+    assert junk["status"] == "RESOLVE" and junk["med_key"] and junk["med_key"] != ""
+
+    s2 = apply_patch(s1, {"medicine": {"med_key": junk["med_key"], "brand_id": "B002"}})
+    assert s2["medicines"][0]["med_key"] == junk["med_key"]       # key survives resolution
+
+    s3 = run(hindi, prior=s2)                                     # same Devanagari again
+    assert len(s3["medicines"]) == 1 and s3["medicines"][0]["matched"] == "Dolo 500mg"
+    assert s3["blocks_approval"] is False
+
+    latin = extraction([med("dolo 500", "1-0-1")], "viral fever")  # now heard in Latin script
+    s4 = run(latin, prior=s3)
+    assert len(s4["medicines"]) == 1 and s4["medicines"][0]["locked"] is True
+
+
+def test_two_spoken_forms_of_one_brand_collapse_to_one_item():
+    s1 = run(extraction([med("dolo 650")], "viral fever"))
+    s2 = run(extraction([med("Dolo 650mg"), med("dolo six fifty")], "viral fever"), prior=s1)
+    assert [m["med_key"] for m in s2["medicines"]] == ["B001"]

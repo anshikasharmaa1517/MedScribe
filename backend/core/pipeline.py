@@ -5,6 +5,7 @@ persistence. Each extraction pass re-reads the whole transcript, so the merge
 with prior state is what keeps a doctor's edits and previously seen medicines
 from being wiped by the next 15-second cycle.
 """
+import hashlib
 import logging
 import re
 
@@ -52,9 +53,13 @@ def empty_draft() -> dict:
 
 
 def med_key(brand_id, spoken) -> str:
+    """Stable identity for a medicine across passes: brand_id once resolved, else the
+    normalised spoken name. Unicode-aware, so a Devanagari name ("डोलो फाइव हंड्रेड")
+    keeps a real key instead of collapsing to an empty string."""
     if brand_id:
         return brand_id
-    return re.sub(r"[^a-z0-9]+", " ", spoken.lower()).strip()
+    key = re.sub(r"[\s!-/:-@\[-`{-~]+", " ", (spoken or "").casefold()).strip()
+    return key or "spoken:" + hashlib.sha1((spoken or "").encode()).hexdigest()[:8]
 
 
 def _resolve_one(ex_med: dict, resolver) -> dict:
@@ -77,24 +82,33 @@ def _resolve_one(ex_med: dict, resolver) -> dict:
     return item
 
 
-def _merge_medicines(prior_meds: list, new_meds: list) -> list:
-    new_by_key = {}
-    for m in new_meds:
-        new_by_key.setdefault(m["med_key"], m)
+def _same_medicine(prior: dict, new: dict) -> bool:
+    """A new extraction hit refers to a prior item if the keys match, or if both
+    resolve to the same brand. The second case is what keeps a doctor-resolved
+    item from being duplicated when the next pass hears the name differently."""
+    if prior["med_key"] == new["med_key"]:
+        return True
+    return bool(prior.get("brand_id")) and prior.get("brand_id") == new.get("brand_id")
 
+
+def _merge_medicines(prior_meds: list, new_meds: list) -> list:
     merged = []
-    seen = set()
+    consumed: set[int] = set()
     for pm in prior_meds:
-        k = pm["med_key"]
-        seen.add(k)
-        if pm.get("locked") or pm.get("deleted") or k not in new_by_key:
+        match = next((i for i, m in enumerate(new_meds)
+                      if i not in consumed and _same_medicine(pm, m)), None)
+        if match is not None:
+            consumed.add(match)
+        if match is None or pm.get("locked") or pm.get("deleted"):
             merged.append(dict(pm))
         else:
-            merged.append(new_by_key[k])
-    for m in new_meds:
-        if m["med_key"] not in seen:
-            seen.add(m["med_key"])
-            merged.append(m)
+            merged.append({**new_meds[match], "med_key": pm["med_key"]})
+    seen_keys = {m["med_key"] for m in merged}
+    for i, m in enumerate(new_meds):
+        if i in consumed or m["med_key"] in seen_keys:
+            continue
+        seen_keys.add(m["med_key"])
+        merged.append(m)
     return merged
 
 
