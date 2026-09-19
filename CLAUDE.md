@@ -124,15 +124,25 @@ have no brand, 2 have no condition mapping.
   (START / TAKEN / chat stub). Message ids are claimed in DynamoDB (`WAMSG#<id>`) so
   Meta's redeliveries are no-ops. Voice notes/images/docs arrive as `[audio]` etc. and go
   to the chat stub — never dropped.
+- **Meta app** `Med Scribe` (id 3891062647708083), WABA `912350245004801`, test number
+  `+1 555 141 5470` / phone-number-id `1355040301022201`. Webhook callback is the
+  `WhatsAppWebhookUrl` stack output, subscribed to the `messages` field; the app is
+  subscribed to the WABA (`POST /{waba}/subscribed_apps`). Verified end to end 2026-09-19:
+  inbound START → patient linked; outbound free-form text → sent/delivered/read receipts.
 - Secrets in SSM under `/medscribe/dev/`: `WA_ACCESS_TOKEN`, `WA_APP_SECRET`,
   `WA_VERIFY_TOKEN`, `WA_PHONE_NUMBER_ID`. Locally the same names in `.env`, plus
-  `WA_TEST_NUMBER` for the QR (`scripts/generate_qr.py` → `wa.me/<number>?text=START <doctorId>`).
-- Constraints: test number reaches **5 verified recipients**; free-form text/documents
-  only inside 24 h of the patient's last inbound; templates otherwise. The
-  `medicine_reminder` utility template ({{1}} name, {{2}} medicine, {{3}} timing) is
-  submitted from WhatsApp Manager and is what step 12 sends via `send_template`.
+  `WA_BUSINESS_ACCOUNT_ID` and `WA_TEST_NUMBER` (QR: `scripts/generate_qr.py` →
+  `wa.me/<number>?text=START <doctorId>`).
+- **The access token in SSM is the 24 h temporary one.** Replace with a system-user token
+  (business.facebook.com → System users → generate with `whatsapp_business_messaging` +
+  `whatsapp_business_management`) and `put-parameter --overwrite` before the demo.
+- Constraints: test number reaches **5 verified recipients** (API Setup → "To" list);
+  free-form text/documents only inside 24 h of the patient's last inbound; templates
+  otherwise. `medicine_reminder` (UTILITY, en, {{1}} name / {{2}} medicine / {{3}} timing,
+  "Taken" quick-reply) is submitted and PENDING; `hello_world` is approved for smoke tests.
 - Outbound is dry-run by default (`DRY_RUN`); real sends are metered in
-  DynamoDB `METER#whatsapp_sent`, refused past `MESSAGING_BUDGET` (500).
+  DynamoDB `METER#whatsapp_sent`, refused past `MESSAGING_BUDGET` (500). Setting names
+  are `DRY_RUN` / `WA_API_VERSION` (shared with the pipeline and reminder handlers).
 - Patient `23989008536c` (+918899511700) was linked during the Twilio test and is still
   in the table.
 
