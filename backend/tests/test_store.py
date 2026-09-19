@@ -165,3 +165,16 @@ def test_demo_history_is_clinically_clean(store):
             verdicts = [m["clinical"] for m in result["medicines"]]
             assert all(v == "OK" for v in verdicts), (rx["diagnosis"], verdicts)
             assert result["duplicate_salts"] == []
+
+
+def test_reminder_taken_and_counter(store):
+    r = store.put_reminder("p1", {"dueAt": "2026-09-20T08:00:00Z", "brand_id": "B001",
+                                  "status": "SENT"})
+    store.mark_reminder_taken(r)
+    got = store.list_reminders("p1")[0]
+    assert got["status"] == "TAKEN" and got["takenAt"] and got["takenVia"] == "whatsapp"
+
+    assert store.get_counter("whatsapp_sent") == 0
+    assert store.increment_counter("whatsapp_sent") == 1
+    assert store.increment_counter("whatsapp_sent") == 2
+    assert store.get_counter("whatsapp_sent") == 2

@@ -4,3 +4,4 @@ ruff>=0.6
 moto[dynamodb]>=5.0
 google-genai>=1.0
 aws-sam-cli
+qrcode[pil]>=7.4

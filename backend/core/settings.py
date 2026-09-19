@@ -44,6 +44,16 @@ BEDROCK_API_KEY = os.environ.get("BEDROCK_API_KEY", "")
 BEDROCK_MANTLE_URL = os.environ.get("BEDROCK_MANTLE_URL", "https://bedrock-mantle.ap-south-1.api.aws/v1")
 MANTLE_MODEL_ID = os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b")
 
+# Twilio WhatsApp. DRY_RUN defaults on: the sandbox allows 100 messages total, so a
+# real send is an explicit decision, never a default. The sandbox number is shared
+# by every Twilio account; the join code is per account.
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_NUMBER = os.environ.get("TWILIO_WHATSAPP_NUMBER") or "+14155238886"
+TWILIO_SANDBOX_JOIN_CODE = os.environ.get("TWILIO_SANDBOX_JOIN_CODE", "")
+MESSAGING_DRY_RUN = os.environ.get("MESSAGING_DRY_RUN", "true").lower() != "false"
+MESSAGING_BUDGET = int(os.environ.get("MESSAGING_BUDGET", "100"))
+
 # Extraction call. The prompt lives in a text file so it can be tuned without a
 # code change; the token cap is deliberately low because this runs every 10-15s.
 EXTRACT_PROMPT_PATH = os.environ.get(

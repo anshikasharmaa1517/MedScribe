@@ -11,6 +11,15 @@ Parameters:
   MantleModelId:
     Type: String
     Default: openai.gpt-oss-120b
+  MessagingDryRun:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Outbound WhatsApp logs instead of sending unless "false". 100 sandbox messages total.
+  TwilioWhatsAppNumber:
+    Type: String
+    Default: "+14155238886"
+    Description: The Twilio WhatsApp sandbox number (shared across accounts).
 
 Globals:
   Function:
@@ -235,11 +244,48 @@ Resources:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/approve", Method: POST }
 
+  # Inbound WhatsApp. Unauthenticated (Twilio calls it), so the handler verifies
+  # X-Twilio-Signature with the auth token from SSM before touching the body, then
+  # re-invokes itself asynchronously so Twilio gets its 200 fast.
+  TwilioWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub medscribe-twilio-webhook-${Env}
+      CodeUri: ../backend
+      Handler: handlers.twilio_webhook.handler
+      Timeout: 20
+      Environment:
+        Variables:
+          MESSAGING_DRY_RUN: !Ref MessagingDryRun
+          TWILIO_WHATSAPP_NUMBER: !Ref TwilioWhatsAppNumber
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:medscribe-twilio-webhook-${Env}
+      Events:
+        Inbound:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /webhooks/twilio
+            Method: POST
+            Auth: { Authorizer: NONE }
+
 Outputs:
   ApiUrl:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
   HealthUrl:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/health
+  TwilioWebhookUrl:
+    Description: Paste into Twilio sandbox -> "When a message comes in" (POST).
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/webhooks/twilio
   TableName:
     Value: !Ref MedscribeTable
   BucketName:

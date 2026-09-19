@@ -294,13 +294,43 @@ class Store:
         items = self._query(f"PAT#{patient_id}", "REM#")
         return [r for r in items if not from_iso or r["dueAt"] >= from_iso]
 
-    def set_reminder_status(self, patient_id: str, due_at: str, rem_id: str, status: str):
+    def set_reminder_status(self, patient_id: str, due_at: str, rem_id: str, status: str,
+                            **extra):
+        names = {"#s": "status"}
+        values = {":s": status, ":t": now_iso()}
+        sets = ["#s = :s", "updatedAt = :t"]
+        for i, (k, v) in enumerate(extra.items()):
+            names[f"#e{i}"] = k
+            values[f":e{i}"] = to_dynamo(v)
+            sets.append(f"#e{i} = :e{i}")
         self.table.update_item(
             Key={"PK": f"PAT#{patient_id}", "SK": f"REM#{due_at}#{rem_id}"},
-            UpdateExpression="SET #s = :s, updatedAt = :t",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":s": status, ":t": now_iso()},
+            UpdateExpression="SET " + ", ".join(sets),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
         )
+
+    def mark_reminder_taken(self, reminder: dict, via: str = "whatsapp") -> None:
+        self.set_reminder_status(
+            reminder["patientId"], reminder["dueAt"], reminder["remId"], "TAKEN",
+            takenAt=now_iso(), takenVia=via,
+        )
+
+    # -- counters ---------------------------------------------------------
+
+    def increment_counter(self, name: str, by: int = 1) -> int:
+        out = self.table.update_item(
+            Key={"PK": f"METER#{name}", "SK": "COUNT"},
+            UpdateExpression="SET entity = :e, updatedAt = :t ADD #n :by",
+            ExpressionAttributeNames={"#n": "count"},
+            ExpressionAttributeValues={":e": "METER", ":t": now_iso(), ":by": by},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(out["Attributes"]["count"])
+
+    def get_counter(self, name: str) -> int:
+        item = self._get(f"METER#{name}", "COUNT")
+        return int(item.get("count", 0)) if item else 0
 
     # -- doctor shortlist (Tier 1) ----------------------------------------
 
