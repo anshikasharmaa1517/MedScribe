@@ -174,3 +174,66 @@ def test_llm_failure_keeps_prior_draft(api, monkeypatch):
     status, draft = call(api, "GET", f"/consults/{cid}/draft")
     assert status == 200 and draft["extraction_error"] == "down"
     assert [m["med_key"] for m in draft["medicines"]] == [m["med_key"] for m in good["medicines"]]
+
+
+# -- step 13: patient routes, doctor history/ask, review queue -----------------
+
+def patient_event(method, path, body=None, phone="+919800000001"):
+    ev = event(method, path, body, jwt=False)
+    claims = {"sub": "p-sub", "phone_number": phone}
+    ev["requestContext"]["authorizer"] = {"jwt": {"claims": claims}}
+    return ev
+
+
+def pcall(api, method, path, body=None, **kw):
+    res = api.handler(patient_event(method, path, body, **kw), None)
+    return res["statusCode"], json.loads(res["body"])
+
+
+def test_patient_sees_only_own_history(api):
+    status, me = pcall(api, "GET", "/me")
+    assert status == 200 and me["name"] == "Ramesh Iyer"
+    status, hist = pcall(api, "GET", "/me/history")
+    assert status == 200 and len(hist["prescriptions"]) == 3
+    assert all(rx["doctor"] == "Dr. Meera Krishnan" for rx in hist["prescriptions"])
+    assert hist["prescriptions"][0]["date"] > hist["prescriptions"][-1]["date"]
+    assert pcall(api, "GET", "/me/history", phone="+910000000000")[0] == 404
+    # a patient token cannot use doctor routes, and vice versa
+    assert pcall(api, "GET", "/patients")[0] == 401
+    assert call(api, "GET", "/me/history")[0] == 401
+
+
+def test_patient_ask_is_scoped_and_validated(api, monkeypatch):
+    monkeypatch.setattr(api, "_client", StubLLM({"answer": "Amlong 5mg, 1 tablet morning.",
+                                                 "sources": ["pat-demo-001-rx3"]}))
+    status, out = pcall(api, "POST", "/me/ask", {"question": "BP ki dawai kaunsi hai?"})
+    assert status == 200 and out["answer"].startswith("Amlong")
+    assert out["sources"] == ["pat-demo-001-rx3"]
+    assert pcall(api, "POST", "/me/ask", {"question": ""})[0] == 400
+    assert pcall(api, "POST", "/me/ask", {"question": "x" * 501})[0] == 400
+
+
+def test_doctor_history_and_ask_limited_to_own_patients(api, monkeypatch):
+    monkeypatch.setattr(api, "_client", StubLLM({"answer": "ok", "sources": []}))
+    status, hist = call(api, "GET", "/patients/pat-demo-002/history")
+    assert status == 200 and hist["patient"]["name"] == "Priya Sharma"
+    assert call(api, "POST", "/patients/pat-demo-002/ask", {"question": "q"})[0] == 200
+    assert call(api, "GET", "/patients/pat-demo-002/history", doctor="other")[0] == 404
+
+
+def test_review_queue_requires_reviewer_group(api):
+    assert call(api, "GET", "/review/pending")[0] == 403
+    ev = event("GET", "/review/pending")
+    ev["requestContext"]["authorizer"]["jwt"]["claims"]["cognito:groups"] = ["reviewers"]
+    res = api.handler(ev, None)
+    pending = json.loads(res["body"])
+    assert res["statusCode"] == 200
+    assert {p["propId"] for p in pending} == {"prop-demo-001", "prop-demo-002"}
+
+    p = pending[0]
+    ev = event("POST", f"/review/{p['createdAt']}/{p['propId']}", {"decision": "rejected"})
+    ev["requestContext"]["authorizer"]["jwt"]["claims"]["cognito:groups"] = "[reviewers]"
+    res = api.handler(ev, None)
+    assert res["statusCode"] == 200 and json.loads(res["body"])["status"] == "REJECTED"
+    assert len(api.store().list_pending_proposals()) == 1
+    assert api.store().count_reference(api.store().brands) == 0   # nothing promoted, ever

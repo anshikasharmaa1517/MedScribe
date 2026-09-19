@@ -57,13 +57,31 @@ export type Consult = {
   consultId: string;
   patientId: string;
   doctorId: string;
-  status: "LIVE" | "APPROVED" | "CANCELLED";
+  status: "LIVE" | "APPROVING" | "APPROVED" | "APPROVAL_FAILED" | "CANCELLED";
+  rxId?: string;
+  approvalError?: string;
+  approvalBlockedBy?: string[];
   createdAt: string;
   transcript: TranscriptLine[];
   draft: Draft;
 };
 
 export type BrandHit = { brand_id: string; label: string; salt_ids: string[] };
+
+export type Prescription = {
+  rxId: string;
+  approvedAt?: string;
+  diagnosis: string | null;
+  medicines: { brand_id: string | null; label: string; frequency: string | null; food_relation: string | null; duration: string | null }[];
+  sentAt?: string | null;
+  document: { format: "pdf" | "html"; url: string; expires_in: number } | null;
+};
+
+export type Proposal = {
+  propId: string; createdAt: string; status: string; source?: string;
+  spoken?: string; proposed_brand?: string; proposed_salts?: string[];
+  evidence_url?: string; confidence?: number; note?: string;
+};
 
 export type MedicinePatch =
   | { med_key: string; frequency?: string | null; food_relation?: string | null; duration?: string | null }
@@ -86,5 +104,8 @@ export interface Api {
   getDraft(id: string): Promise<Draft>;
   patchDraft(id: string, patch: DraftPatch): Promise<Draft>;
   approve(id: string): Promise<{ status: string; rxId: string }>;
+  getPrescription(id: string): Promise<Prescription>;
+  listPending(): Promise<Proposal[]>;
+  review(createdAt: string, propId: string, decision: "APPROVED" | "REJECTED"): Promise<{ status: string }>;
   searchBrands(q: string): Promise<BrandHit[]>;
 }

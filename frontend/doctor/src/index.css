@@ -94,3 +94,11 @@ select { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); bor
 .login-card .btn { margin-top: .5rem; }
 .sessionbar { max-width: 1280px; margin: 0 auto; padding: .4rem 1rem 0; display: flex; justify-content: flex-end; gap: .75rem; align-items: center; font-size: .85rem; }
 .line.partial .text { color: var(--muted); font-style: italic; }
+.green-bg { background: var(--green-bg); color: var(--green); }
+.notice a { color: inherit; font-weight: 600; }
+
+.review { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: .95rem; }
+.review th, .review td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.review th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #f9fafb; }
+.actions-cell { white-space: nowrap; }
+.actions-cell .btn + .btn { margin-left: .4rem; }

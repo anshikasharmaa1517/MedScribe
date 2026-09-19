@@ -26,5 +26,9 @@ dist/
 .idea/
 .vscode/
 
+# Rendered samples
+backend/out/
+infra/layers/**/layer.zip
+
 # Generated onboarding QR codes
 qr-*.png

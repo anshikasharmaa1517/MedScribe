@@ -31,6 +31,34 @@ SALTS_TABLE = os.environ.get("SALTS_TABLE", "salts")
 CONDITIONS_TABLE = os.environ.get("CONDITIONS_TABLE", "conditions")
 DYNAMODB_ENDPOINT_URL = os.environ.get("DYNAMODB_ENDPOINT_URL") or None
 
+# S3 bucket for rx PDFs and audio (stack output BucketName). Presigned URL lifetime.
+MEDSCRIBE_BUCKET = os.environ.get("MEDSCRIBE_BUCKET", "")
+PDF_URL_TTL_SECONDS = int(os.environ.get("PDF_URL_TTL_SECONDS", 24 * 3600))
+
+# WhatsApp via the Meta Cloud API. DRY_RUN defaults ON: nothing is sent unless explicitly
+# enabled. Real sends are metered in DynamoDB and refused past MESSAGING_BUDGET.
+# The test number reaches 5 verified recipients.
+DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
+MESSAGING_BUDGET = int(os.environ.get("MESSAGING_BUDGET", "500"))
+WA_PROVIDER = os.environ.get("WA_PROVIDER", "meta")
+WA_API_VERSION = os.environ.get("WA_API_VERSION", "v25.0")
+WA_PHONE_NUMBER_ID = os.environ.get("WA_PHONE_NUMBER_ID", "")
+WA_BUSINESS_ACCOUNT_ID = os.environ.get("WA_BUSINESS_ACCOUNT_ID", "")
+WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "")
+WA_APP_SECRET = os.environ.get("WA_APP_SECRET", "")  # signs X-Hub-Signature-256 on webhooks
+WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "")  # our string, echoed in the GET handshake
+WA_TEST_NUMBER = os.environ.get("WA_TEST_NUMBER", "")  # E.164 of the sender, for the QR
+
+# Post-approval Step Functions state machine (stack output). Unset = approve persists inline.
+STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
+
+# Reminders: EventBridge Scheduler targets the reminder Lambda via SCHEDULER_ROLE_ARN.
+# Unset = ScheduleReminders writes the plan rows only (tests, first deploy).
+REMINDER_FUNCTION_ARN = os.environ.get("REMINDER_FUNCTION_ARN", "")
+SCHEDULER_ROLE_ARN = os.environ.get("SCHEDULER_ROLE_ARN", "")
+SCHEDULE_GROUP = os.environ.get("SCHEDULE_GROUP", "default")
+WA_REMINDER_TEMPLATE = os.environ.get("WA_REMINDER_TEMPLATE", "medicine_reminder")
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mantle")
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
@@ -43,18 +71,6 @@ GEMINI_MODEL_ID = os.environ.get("GEMINI_MODEL_ID", "gemini-3.6-flash")
 BEDROCK_API_KEY = os.environ.get("BEDROCK_API_KEY", "")
 BEDROCK_MANTLE_URL = os.environ.get("BEDROCK_MANTLE_URL", "https://bedrock-mantle.ap-south-1.api.aws/v1")
 MANTLE_MODEL_ID = os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b")
-
-# WhatsApp via the Meta Cloud API (Graph). DRY_RUN defaults on: a real send is an
-# explicit decision, never a default. The test number can reach 5 verified recipients.
-WA_GRAPH_VERSION = os.environ.get("WA_GRAPH_VERSION", "v25.0")
-WA_PHONE_NUMBER_ID = os.environ.get("WA_PHONE_NUMBER_ID", "")
-WA_BUSINESS_ACCOUNT_ID = os.environ.get("WA_BUSINESS_ACCOUNT_ID", "")
-WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "")
-WA_APP_SECRET = os.environ.get("WA_APP_SECRET", "")  # signs X-Hub-Signature-256 on webhooks
-WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "")  # our string, echoed in the GET handshake
-WA_TEST_NUMBER = os.environ.get("WA_TEST_NUMBER", "")  # E.164 of the sender, for the QR
-MESSAGING_DRY_RUN = os.environ.get("MESSAGING_DRY_RUN", "true").lower() != "false"
-MESSAGING_BUDGET = int(os.environ.get("MESSAGING_BUDGET", "500"))
 
 # Extraction call. The prompt lives in a text file so it can be tuned without a
 # code change; the token cap is deliberately low because this runs every 10-15s.

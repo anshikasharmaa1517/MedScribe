@@ -294,26 +294,35 @@ class Store:
         items = self._query(f"PAT#{patient_id}", "REM#")
         return [r for r in items if not from_iso or r["dueAt"] >= from_iso]
 
-    def set_reminder_status(self, patient_id: str, due_at: str, rem_id: str, status: str,
-                            **extra):
-        names = {"#s": "status"}
-        values = {":s": status, ":t": now_iso()}
-        sets = ["#s = :s", "updatedAt = :t"]
-        for i, (k, v) in enumerate(extra.items()):
-            names[f"#e{i}"] = k
-            values[f":e{i}"] = to_dynamo(v)
-            sets.append(f"#e{i} = :e{i}")
+    def get_reminder(self, patient_id: str, due_at: str, rem_id: str):
+        return self._get(f"PAT#{patient_id}", f"REM#{due_at}#{rem_id}")
+
+    def set_reminder_fields(self, patient_id: str, due_at: str, rem_id: str, **fields):
+        fields["updatedAt"] = now_iso()
+        names = {f"#f{i}": k for i, k in enumerate(fields)}
+        values = {f":v{i}": to_dynamo(v) for i, v in enumerate(fields.values())}
         self.table.update_item(
             Key={"PK": f"PAT#{patient_id}", "SK": f"REM#{due_at}#{rem_id}"},
-            UpdateExpression="SET " + ", ".join(sets),
+            UpdateExpression="SET " + ", ".join(f"{n} = :v{i}" for i, n in enumerate(names)),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
 
+    def set_reminder_status(self, patient_id: str, due_at: str, rem_id: str, status: str):
+        self.set_reminder_fields(patient_id, due_at, rem_id, status=status)
+
     def mark_reminder_taken(self, reminder: dict, via: str = "whatsapp") -> None:
-        self.set_reminder_status(
-            reminder["patientId"], reminder["dueAt"], reminder["remId"], "TAKEN",
-            takenAt=now_iso(), takenVia=via,
+        self.set_reminder_fields(
+            reminder["patientId"], reminder["dueAt"], reminder["remId"],
+            status="TAKEN", takenAt=now_iso(), takenVia=via,
+        )
+
+    def touch_patient_inbound(self, patient_id: str, at: str | None = None):
+        """Record the patient's latest inbound WhatsApp message (opens the 24 h window)."""
+        self.table.update_item(
+            Key={"PK": f"PAT#{patient_id}", "SK": "PROFILE"},
+            UpdateExpression="SET lastInboundAt = :t",
+            ExpressionAttributeValues={":t": at or now_iso()},
         )
 
     # -- counters ---------------------------------------------------------

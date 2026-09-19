@@ -47,9 +47,10 @@ def test_number_helpers():
 
 def test_dry_run_is_the_default_and_never_posts(monkeypatch):
     calls = []
-    monkeypatch.setattr(messaging, "MESSAGING_DRY_RUN", True)
+    monkeypatch.setattr(messaging, "DRY_RUN", True)
     out = send_text("+919800000001", "hi", post=lambda *a: calls.append(a))
-    assert out == {"dry_run": True, "to": "+919800000001", "type": "text", "summary": "hi"}
+    assert out["dry_run"] is True and out["to"] == "+919800000001" and out["summary"] == "hi"
+    assert out["payload"]["text"]["body"] == "hi"
     assert calls == []
 
 
@@ -70,13 +71,13 @@ def test_text_send_posts_graph_payload_with_bearer_and_counts():
         "messaging_product": "whatsapp", "recipient_type": "individual", "to": "919800000001",
         "type": "text", "text": {"preview_url": False, "body": "hello"},
     }
-    assert out == {"dry_run": False, "to": "+919800000001", "type": "text", "summary": "hello",
-                   "message_id": "wamid.X", "sent_count": 1}
+    assert out == {"dry_run": False, "provider": "meta", "to": "+919800000001", "type": "text",
+                   "summary": "hello", "message_id": "wamid.X", "sent_count": 1}
 
 
 def test_template_send_fills_body_params_in_order():
     captured = {}
-    send_template("+919800000001", "medicine_reminder", "en", ["Asha", "Dolo 650", "9 pm"],
+    send_template("+919800000001", "medicine_reminder", ["Asha", "Dolo 650", "9 pm"], "en",
                   dry_run=False, meter=lambda: 1, phone_number_id="1", access_token="t",
                   post=make_post(captured))
     assert captured["payload"]["type"] == "template"
@@ -91,7 +92,7 @@ def test_template_send_fills_body_params_in_order():
 
 def test_template_without_params_has_no_components():
     captured = {}
-    send_template("+91", "hello_world", "en_US", dry_run=False, meter=lambda: 1,
+    send_template("+91", "hello_world", lang="en_US", dry_run=False, meter=lambda: 1,
                   phone_number_id="1", access_token="t", post=make_post(captured))
     assert captured["payload"]["template"] == {"name": "hello_world", "language": {"code": "en_US"}}
 

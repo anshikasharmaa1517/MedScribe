@@ -3,7 +3,7 @@
 
 import { getIdToken, logout } from "./auth";
 import { mockApi } from "./mock/api";
-import type { Api, Consult, Draft, DraftPatch, Patient } from "./types";
+import type { Api, Consult, Draft, DraftPatch, Patient, Prescription, Proposal } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE as string | undefined;
 const ENV_TOKEN = import.meta.env.VITE_ID_TOKEN as string | undefined;
@@ -43,6 +43,10 @@ const realApi: Api = {
   getDraft: (id) => call<Draft>("GET", `/consults/${id}/draft`),
   patchDraft: (id, patch: DraftPatch) => call<Draft>("PATCH", `/consults/${id}/draft`, patch),
   approve: (id) => call("POST", `/consults/${id}/approve`),
+  getPrescription: (id) => call<Prescription>("GET", `/consults/${id}/prescription`),
+  listPending: () => call<Proposal[]>("GET", "/review/pending"),
+  review: (createdAt, propId, decision) =>
+    call("POST", `/review/${encodeURIComponent(createdAt)}/${propId}`, { decision }),
   searchBrands: (q) => call("GET", `/brands?q=${encodeURIComponent(q)}`),
 };
 

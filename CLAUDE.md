@@ -131,7 +131,7 @@ have no brand, 2 have no condition mapping.
   only inside 24 h of the patient's last inbound; templates otherwise. The
   `medicine_reminder` utility template ({{1}} name, {{2}} medicine, {{3}} timing) is
   submitted from WhatsApp Manager and is what step 12 sends via `send_template`.
-- Outbound is dry-run by default (`MESSAGING_DRY_RUN`); real sends are metered in
+- Outbound is dry-run by default (`DRY_RUN`); real sends are metered in
   DynamoDB `METER#whatsapp_sent`, refused past `MESSAGING_BUDGET` (500).
 - Patient `23989008536c` (+918899511700) was linked during the Twilio test and is still
   in the table.

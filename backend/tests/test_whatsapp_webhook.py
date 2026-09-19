@@ -23,7 +23,7 @@ KNOWN_PHONE = "+919800000001"  # pat-demo-001 from the demo seed
 @pytest.fixture
 def sent(monkeypatch):
     calls = []
-    monkeypatch.setattr(messaging, "MESSAGING_DRY_RUN", True)
+    monkeypatch.setattr(messaging, "DRY_RUN", True)
     original = messaging.send_text
 
     def capture(to, body, **kw):

@@ -57,7 +57,7 @@ def main(argv=None):
         elif args.text:
             out = send_text(args.to, args.text, **kw)
         else:
-            out = send_template(args.to, args.template, args.lang, args.param or None, **kw)
+            out = send_template(args.to, args.template, args.param or None, args.lang, **kw)
     except MessagingError as e:
         print(f"FAILED: {e}", file=sys.stderr)
         return 1

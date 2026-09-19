@@ -1,0 +1,107 @@
+{
+  "Comment": "MedScribe post-approval pipeline (spec section 3). Each Task is idempotent on rxId.",
+  "StartAt": "FinalTranscript",
+  "States": {
+    "FinalTranscript": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "final_transcript", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }],
+      "Next": "AlreadyApproved?"
+    },
+    "AlreadyApproved?": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.alreadyApproved", "IsPresent": true, "Next": "Done" }],
+      "Default": "FinalExtract"
+    },
+    "FinalExtract": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "final_extract", "input.$": "$" },
+      "TimeoutSeconds": 60,
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 3, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }],
+      "Next": "ResolveValidate"
+    },
+    "ResolveValidate": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "resolve_validate", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }],
+      "Next": "Unresolved?"
+    },
+    "Unresolved?": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.blocksApproval", "BooleanEquals": true, "Next": "BackToDashboard" }],
+      "Default": "RenderPDF"
+    },
+    "BackToDashboard": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "unblock", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Next": "UnresolvedItems"
+    },
+    "UnresolvedItems": {
+      "Type": "Fail",
+      "Error": "UnresolvedItems",
+      "Cause": "A medicine is still RESOLVE after the final pass; consult returned to the dashboard."
+    },
+    "RenderPDF": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "render_pdf", "input.$": "$" },
+      "TimeoutSeconds": 60,
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 3, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }],
+      "Next": "PersistRx"
+    },
+    "PersistRx": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "persist_rx", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }],
+      "Next": "SendPrescription"
+    },
+    "SendPrescription": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "send_prescription", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.sendError", "Next": "SendGenerics" }],
+      "Next": "SendGenerics"
+    },
+    "SendGenerics": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "send_generics", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.genericsError", "Next": "ScheduleReminders" }],
+      "Next": "ScheduleReminders"
+    },
+    "ScheduleReminders": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "schedule_reminders", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.remindersError", "Next": "Done" }],
+      "Next": "Done"
+    },
+    "MarkFailed": {
+      "Type": "Task",
+      "Resource": "${PipelineFunctionArn}",
+      "Parameters": { "step": "mark_failed", "input.$": "$" },
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 2, "BackoffRate": 2.0 }],
+      "Next": "ApprovalFailed"
+    },
+    "ApprovalFailed": {
+      "Type": "Fail",
+      "Error": "ApprovalFailed",
+      "Cause": "A pipeline step failed after retries; consult marked APPROVAL_FAILED."
+    },
+    "Done": { "Type": "Succeed" }
+  }
+}

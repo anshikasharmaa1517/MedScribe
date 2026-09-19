@@ -11,11 +11,18 @@ Parameters:
   MantleModelId:
     Type: String
     Default: openai.gpt-oss-120b
-  MessagingDryRun:
+  WeasyPrintLayerArn:
+    Type: String
+    Default: ""
+    Description: Optional Lambda layer ARN with WeasyPrint + pango. Empty = pipeline publishes HTML.
+  DryRun:
     Type: String
     Default: "true"
     AllowedValues: ["true", "false"]
-    Description: Outbound WhatsApp logs instead of sending unless "false".
+    Description: When true, outbound WhatsApp is logged, not sent. Flip only for the demo.
+
+Conditions:
+  HasWeasyPrintLayer: !Not [!Equals [!Ref WeasyPrintLayerArn, ""]]
 
 Globals:
   Function:
@@ -148,7 +155,11 @@ Resources:
       ClientName: patient-web
       UserPoolId: !Ref PatientUserPool
       GenerateSecret: false
-      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH      # patient web login (phone + password)
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
 
   # ---------------------------------------------------------------- api
   HttpApi:
@@ -166,6 +177,11 @@ Resources:
             JwtConfiguration:
               issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${DoctorUserPool}
               audience: [!Ref DoctorUserPoolClient]
+          PatientJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${PatientUserPool}
+              audience: [!Ref PatientUserPoolClient]
         DefaultAuthorizer: DoctorJwt
 
   HealthFunction:
@@ -206,8 +222,11 @@ Resources:
         Variables:
           LLM_PROVIDER: mantle
           MANTLE_MODEL_ID: !Ref MantleModelId
+          STATE_MACHINE_ARN: !Ref ApprovalStateMachine
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
+        - S3ReadPolicy: { BucketName: !Sub "medscribe-${Env}-${AWS::AccountId}" }
+        - StepFunctionsExecutionPolicy: { StateMachineName: !GetAtt ApprovalStateMachine.Name }
         - Statement:
             - Effect: Allow
               Action: ssm:GetParametersByPath
@@ -215,6 +234,31 @@ Resources:
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
       Events:
+        Prescription:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/prescription", Method: GET }
+        PatientHistory:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/patients/{id}/history", Method: GET }
+        PatientAsk:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/patients/{id}/ask", Method: POST }
+        ReviewPending:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /review/pending, Method: GET }
+        ReviewDecide:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/review/{createdAt}/{propId}", Method: POST }
+        # Patient-pool routes: the Lambda resolves the patient from the token's phone_number.
+        Me:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /me, Method: GET, Auth: { Authorizer: PatientJwt } }
+        MeHistory:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /me/history, Method: GET, Auth: { Authorizer: PatientJwt } }
+        MeAsk:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /me/ask, Method: POST, Auth: { Authorizer: PatientJwt } }
         Patients:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: /patients, Method: GET }
@@ -240,10 +284,10 @@ Resources:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/consults/{id}/approve", Method: POST }
 
-  # Inbound WhatsApp (Meta Cloud API). Unauthenticated, so the handler verifies
-  # X-Hub-Signature-256 with the app secret from SSM before parsing the body, then
-  # re-invokes itself asynchronously so Meta gets its 200 fast. GET is the one-time
-  # verification handshake.
+  # ---------------------------------------------------------------- inbound whatsapp
+  # Meta Cloud API webhook. Unauthenticated, so the handler verifies X-Hub-Signature-256
+  # with the app secret from SSM before parsing the body, then re-invokes itself
+  # asynchronously so Meta gets its 200 fast. GET is the one-time verification handshake.
   WhatsAppWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -253,7 +297,8 @@ Resources:
       Timeout: 20
       Environment:
         Variables:
-          MESSAGING_DRY_RUN: !Ref MessagingDryRun
+          DRY_RUN: !Ref DryRun
+          WA_PROVIDER: meta
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
         - Statement:
@@ -281,7 +326,104 @@ Resources:
             Method: POST
             Auth: { Authorizer: NONE }
 
+  # ---------------------------------------------------------------- approval pipeline
+  PipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub medscribe-pipeline-${Env}
+      CodeUri: ../backend
+      Handler: handlers.pipeline_steps.handler
+      Timeout: 90
+      MemorySize: 1024
+      Layers: !If [HasWeasyPrintLayer, [!Ref WeasyPrintLayerArn], !Ref AWS::NoValue]
+      Environment:
+        Variables:
+          LLM_PROVIDER: mantle
+          MANTLE_MODEL_ID: !Ref MantleModelId
+          DRY_RUN: !Ref DryRun
+          WA_PROVIDER: meta
+          FONTCONFIG_FILE: /opt/fonts.conf   # fonts shipped in the WeasyPrint layer
+          REMINDER_FUNCTION_ARN: !GetAtt ReminderFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+          SCHEDULE_GROUP: !Ref ReminderScheduleGroup
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
+        - S3CrudPolicy: { BucketName: !Sub "medscribe-${Env}-${AWS::AccountId}" }
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+            - Effect: Allow
+              Action: [scheduler:CreateSchedule, scheduler:UpdateSchedule, scheduler:GetSchedule,
+                       scheduler:DeleteSchedule]
+              Resource: !Sub arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/medscribe-${Env}/*
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt SchedulerRole.Arn
+              Condition: { StringEquals: { "iam:PassedToService": scheduler.amazonaws.com } }
+
+  # ---------------------------------------------------------------- reminders
+  ReminderScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub medscribe-${Env}
+
+  ReminderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub medscribe-reminder-${Env}
+      CodeUri: ../backend
+      Handler: handlers.reminders.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DRY_RUN: !Ref DryRun
+          WA_PROVIDER: meta
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medscribe/${Env}/*
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { "aws:SourceAccount": !Ref AWS::AccountId } }
+      Policies:
+        - PolicyName: invoke-reminder
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ReminderFunction.Arn
+
+  ApprovalStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub medscribe-approval-${Env}
+      Type: STANDARD
+      DefinitionUri: statemachine/approval.asl.json
+      DefinitionSubstitutions:
+        PipelineFunctionArn: !GetAtt PipelineFunction.Arn
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref PipelineFunction }
+
 Outputs:
+  StateMachineArn:
+    Value: !Ref ApprovalStateMachine
   ApiUrl:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
   HealthUrl:
