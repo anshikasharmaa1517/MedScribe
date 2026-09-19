@@ -8,6 +8,7 @@ import json
 import urllib.error
 import urllib.request
 
+from core.http import ssl_context
 from core.llm import LLMAPIError, LLMError, LLMResponseError, strip_fences
 from core.settings import BEDROCK_API_KEY, BEDROCK_MANTLE_URL, MANTLE_MODEL_ID
 
@@ -33,7 +34,7 @@ class MantleClient:
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as r:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS, context=ssl_context()) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             raise LLMAPIError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}") from e

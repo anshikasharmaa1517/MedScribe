@@ -78,7 +78,8 @@ def test_real_send_posts_form_with_basic_auth_and_counts():
     assert (captured["sid"], captured["token"]) == ("AC1", "tok")
     assert out == {
         "dry_run": False, "to": "whatsapp:+919800000001", "body": "hello",
-        "media_url": "https://x/y.pdf", "sid": "SM123", "status": "queued", "sent_count": 1,
+        "media_url": "https://x/y.pdf", "content_sid": None, "content_variables": None,
+        "sid": "SM123", "status": "queued", "sent_count": 1,
     }
 
 
@@ -123,7 +124,7 @@ def test_basic_auth_header_is_well_formed(monkeypatch):
         def read(self):
             return b'{"sid": "SM1", "status": "queued"}'
 
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context=None):
         seen["auth"] = req.get_header("Authorization")
         seen["data"] = req.data
         return FakeResponse()
@@ -132,3 +133,26 @@ def test_basic_auth_header_is_well_formed(monkeypatch):
     messaging._http_post_form("https://api.twilio.com/x", {"Body": "a b"}, "AC1", "tok")
     assert seen["auth"] == "Basic " + base64.b64encode(b"AC1:tok").decode()
     assert seen["data"] == b"Body=a+b"
+
+
+def test_template_send_uses_content_sid_instead_of_body():
+    captured = {}
+
+    def post(url, form, sid, token):
+        captured.update(form)
+        return {"sid": "SM9", "status": "queued"}
+
+    out = send_whatsapp(
+        "+919800000001", content_sid="HX123", content_variables={"1": "Asha", "2": "9 pm"},
+        dry_run=False, meter=lambda: 1, account_sid="AC1", auth_token="tok",
+        from_number="+1", post=post,
+    )
+    assert "Body" not in captured
+    assert captured["ContentSid"] == "HX123"
+    assert captured["ContentVariables"] == '{"1": "Asha", "2": "9 pm"}'
+    assert out["content_sid"] == "HX123" and out["sid"] == "SM9"
+
+
+def test_send_requires_body_or_template():
+    with pytest.raises(MessagingError):
+        send_whatsapp("+91", dry_run=True)

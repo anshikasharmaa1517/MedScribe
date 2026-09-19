@@ -103,22 +103,44 @@ have no brand, 2 have no condition mapping.
   `doc-demo-meera`; patients `pat-demo-001..003` with 8 prior prescriptions that pass the
   validator clean). Tests use moto — never real AWS.
 - `infra/template.yaml` + `samconfig.toml` — table + GSI1, reference tables, S3, two
-  Cognito pools, HTTP API, `GET /health`. Validated and built; **not yet deployed**.
-- 89 tests, all offline. `.claude/skills/medscribe-review` reviews diffs against the
+  Cognito pools, HTTP API with Cognito JWT authoriser, `/health`, consultation API,
+  Twilio webhook. **Deployed** as stack `medscribe-dev`; tables seeded (Tier 0 + demo).
+- `core/messaging.py` (`send_whatsapp`, `valid_signature`), `core/inbound.py`
+  (START / TAKEN / chat-stub routing), `handlers/twilio_webhook.py`,
+  `scripts/generate_qr.py`, `scripts/send_test_message.py`.
+- 145 tests, all offline. `.claude/skills/medscribe-review` reviews diffs against the
   seven rules.
+
+## Twilio (verified end to end 2026-09-19)
+
+- The account is on Twilio's **new WhatsApp trial flow**, not the classic sandbox:
+  sender `+17372508034`, join phrase `join twilio-trial`. Inbound webhook is set in the
+  console (Send & receive → Inbound); Content, Senders and Alerts APIs are trial-locked.
+- **Trial senders accept only Twilio's canned sample templates** (`ContentSid`), error
+  21654 otherwise — no free-form text even inside the 24 h window, no custom templates,
+  no media. Inbound is unrestricted. The one real message sent was the "Marketing
+  Promotions" sample, `HXd3d932e8cb4598189831c97250c43d17`, delivered and read.
+- Consequence: prescription text, PDF links and reminders **cannot go out on this
+  account as-is**. Options: upgrade the Twilio account (~$20 credit unlocks free-form in
+  the 24 h window + custom templates), or find the classic sandbox under Messaging →
+  Settings if it still exists. Decide before step 10/12.
+- Outbound is dry-run by default everywhere (`MESSAGING_DRY_RUN`); real sends are
+  metered in DynamoDB `METER#whatsapp_sent` and refused past `MESSAGING_BUDGET` (100).
+- Test phone `+918899511700` is joined and linked to `doc-demo-meera` as patient
+  `23989008536c`. Auth token was pasted in a chat session — rotate it after the event.
 
 ## Build order
 
 1. Extraction + glue layer ✅
-2. Doctor dashboard ← **next**
-3. Twilio inbound + outbound
-4. Step Functions pipeline
+2. Doctor dashboard ✅ (mock API; wiring to the real API in progress)
+3. Twilio inbound + outbound ✅
+4. Step Functions pipeline ← **next**
 5. Reminders
 6. Patient dashboard + history chat
 7. Alexa (only if everything above is done)
 
-Do first, regardless: send one WhatsApp message end to end, submit the reminder
-template for approval. Both have external latency. (Bedrock access: resolved via Mantle.)
+Do first, regardless: resolve the Twilio outbound constraint above (upgrade or classic
+sandbox), then submit the reminder template. (Bedrock: resolved via Mantle.)
 
 ## AWS account
 

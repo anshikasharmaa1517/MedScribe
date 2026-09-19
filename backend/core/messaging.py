@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from core.http import ssl_context
 from core.settings import (
     MESSAGING_BUDGET,
     MESSAGING_DRY_RUN,
@@ -80,7 +81,7 @@ def _http_post_form(url: str, form: dict, account_sid: str, auth_token: str) -> 
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as r:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS, context=ssl_context()) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise MessagingAPIError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}") from e
@@ -90,9 +91,11 @@ def _http_post_form(url: str, form: dict, account_sid: str, auth_token: str) -> 
 
 def send_whatsapp(
     to: str,
-    body: str,
+    body: str | None = None,
     media_url: str | None = None,
     *,
+    content_sid: str | None = None,
+    content_variables: dict | None = None,
     dry_run: bool | None = None,
     meter=None,
     account_sid: str | None = None,
@@ -102,16 +105,26 @@ def send_whatsapp(
 ) -> dict:
     """Send one WhatsApp message. Returns a small dict describing what happened.
 
+    Free-form `body` is allowed only inside WhatsApp's 24 h window after the
+    patient's last inbound message. Outside it (reminders), and always on a
+    Twilio trial sender, pass an approved template's `content_sid` plus its
+    `content_variables` instead.
+
     `meter` is a callable returning the running count of real sends after
     incrementing it; defaults to the DynamoDB counter. It runs *before* the send
     so a failed send still burns a slot - the budget is a ceiling, not a ledger.
     """
+    if not body and not content_sid:
+        raise MessagingError("either body or content_sid is required")
     dry_run = MESSAGING_DRY_RUN if dry_run is None else dry_run
     to_addr = whatsapp_address(to)
+    described = {"to": to_addr, "body": body, "media_url": media_url,
+                 "content_sid": content_sid, "content_variables": content_variables}
     if dry_run:
-        log.info("DRY RUN whatsapp -> %s: %s%s", to_addr, body,
+        log.info("DRY RUN whatsapp -> %s: %s%s%s", to_addr, body or "",
+                 f" [template {content_sid} {content_variables or {}}]" if content_sid else "",
                  f" [media {media_url}]" if media_url else "")
-        return {"dry_run": True, "to": to_addr, "body": body, "media_url": media_url}
+        return {"dry_run": True, **described}
 
     account_sid = account_sid or TWILIO_ACCOUNT_SID
     auth_token = auth_token or TWILIO_AUTH_TOKEN
@@ -129,7 +142,13 @@ def send_whatsapp(
     if count > MESSAGING_BUDGET:
         raise MessagingBudgetExceeded(f"send #{count} exceeds budget of {MESSAGING_BUDGET}")
 
-    form = {"From": whatsapp_address(from_number), "To": to_addr, "Body": body}
+    form = {"From": whatsapp_address(from_number), "To": to_addr}
+    if content_sid:
+        form["ContentSid"] = content_sid
+        if content_variables:
+            form["ContentVariables"] = json.dumps(content_variables)
+    else:
+        form["Body"] = body
     if media_url:
         form["MediaUrl"] = media_url
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
@@ -137,6 +156,6 @@ def send_whatsapp(
     log.info("SENT whatsapp -> %s sid=%s status=%s (%d/%d used)",
              to_addr, result.get("sid"), result.get("status"), count, MESSAGING_BUDGET)
     return {
-        "dry_run": False, "to": to_addr, "body": body, "media_url": media_url,
+        "dry_run": False, **described,
         "sid": result.get("sid"), "status": result.get("status"), "sent_count": count,
     }

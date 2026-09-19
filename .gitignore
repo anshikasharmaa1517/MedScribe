@@ -25,3 +25,6 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Generated onboarding QR codes
+qr-*.png

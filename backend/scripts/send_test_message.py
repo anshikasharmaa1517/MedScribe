@@ -7,6 +7,8 @@ recipient must already have joined the sandbox from that phone.
 Run from backend/:
     python -m scripts.send_test_message --to +91XXXXXXXXXX                # dry run, prints
     python -m scripts.send_test_message --to +91XXXXXXXXXX --really       # one real message
+    python -m scripts.send_test_message --to +91XXXXXXXXXX --really --content-sid HX...
+        (a Twilio trial sender only accepts templates, so --content-sid is required there)
 """
 import argparse
 import logging
@@ -41,6 +43,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--to", required=True, help="E.164, e.g. +919876543210")
     parser.add_argument("--body", default=DEFAULT_BODY)
+    parser.add_argument("--content-sid",
+                        help="HX... template id; required on a Twilio trial sender")
+    parser.add_argument("--var", action="append", default=[], metavar="N=VALUE",
+                        help="template variable, e.g. --var 1=Asha (repeatable)")
     parser.add_argument("--really", action="store_true", help="actually send (counts against 100)")
     parser.add_argument("--no-meter", action="store_true",
                         help="skip the DynamoDB budget counter (no AWS creds needed)")
@@ -49,7 +55,10 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     meter = (lambda: 0) if args.no_meter else None
     try:
-        out = send_whatsapp(args.to, args.body, dry_run=not args.really, meter=meter)
+        variables = dict(v.split("=", 1) for v in args.var) or None
+        out = send_whatsapp(args.to, None if args.content_sid else args.body,
+                            content_sid=args.content_sid, content_variables=variables,
+                            dry_run=not args.really, meter=meter)
     except MessagingError as e:
         print(f"FAILED: {e}", file=sys.stderr)
         return 1
