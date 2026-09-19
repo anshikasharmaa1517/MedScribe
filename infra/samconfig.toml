@@ -12,7 +12,7 @@ parallel = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Env=dev"
+parameter_overrides = "Env=dev WeasyPrintLayerArn=arn:aws:lambda:ap-south-1:383688933731:layer:medscribe-weasyprint:1"
 disable_rollback = false
 
 [default.validate.parameters]

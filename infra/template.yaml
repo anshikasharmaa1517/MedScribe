@@ -269,6 +269,7 @@ Resources:
           MANTLE_MODEL_ID: !Ref MantleModelId
           DRY_RUN: !Ref DryRun
           WA_PROVIDER: meta
+          FONTCONFIG_FILE: /opt/fonts.conf   # fonts shipped in the WeasyPrint layer
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MedscribeTable }
         - S3CrudPolicy: { BucketName: !Sub "medscribe-${Env}-${AWS::AccountId}" }

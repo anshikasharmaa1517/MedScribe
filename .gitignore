@@ -28,3 +28,4 @@ dist/
 
 # Rendered samples
 backend/out/
+infra/layers/**/layer.zip
