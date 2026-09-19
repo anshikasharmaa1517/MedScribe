@@ -22,8 +22,10 @@ Bash) with forward slashes — not PowerShell. Run from the repo root unless sta
   `../.venv/Scripts/python.exe -m scripts.seed_reference_tables && ../.venv/Scripts/python.exe -m scripts.seed_demo_data`.
   Store tests use moto — never real AWS.
 - Load `.env` for a one-off script (repo root): `export $(grep -E '^[A-Z_]+=' .env | xargs)`
-- SAM (from `infra/`): `../.venv/Scripts/sam.exe build`, `../.venv/Scripts/sam.exe deploy`.
-  Deploy creates real resources — hand the command to the user rather than running it.
+- SAM (from `infra/`): `../.venv/Scripts/sam.exe build --use-container` then
+  `../.venv/Scripts/sam.exe deploy`. **Always build all functions** — the four Lambdas share
+  one CodeUri, and `sam build <OneFunction>` leaves the others without dependencies
+  (`No module named 'rapidfuzz'` at init). Docker Desktop must be running.
 
 ## Push policy
 
